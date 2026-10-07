@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Until 6 AM</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="c" tabindex="0"></canvas>
+  <canvas id="hud"></canvas>
+
+  <div id="menu" class="screen">
+    <div class="panel">
+      <h1>UNTIL <span>6</span> AM</h1>
+      <p class="sub">14 Alder Lane. Three nights of house-sitting.<br>It's a quiet street. Mostly.</p>
+      <label class="field">Your name <input id="name" maxlength="12" placeholder="Player" autocomplete="off"></label>
+      <div id="mpControls">
+        <button id="btnHost">Host a Game</button>
+        <div class="row">
+          <input id="code" maxlength="4" placeholder="CODE" autocomplete="off">
+          <button id="btnJoin">Join</button>
+        </div>
+      </div>
+      <button id="btnSolo" class="alt">Play Solo</button>
+      <p id="soloNote" class="small hidden">This version is solo only. To play with friends, open the full game:<br><a id="mpLink" target="_blank" rel="noopener"></a></p>
+      <button id="btnHelp" class="ghost">How to Play</button>
+      <p id="status"></p>
+    </div>
+  </div>
+
+  <div id="lobby" class="screen hidden">
+    <div class="panel">
+      <p class="sub">Room code</p>
+      <div id="lobbyCode">----</div>
+      <p class="small">Friends: open this same page, type the code and press <b>Join</b>.</p>
+      <p class="small link"><span id="lobbyLink"></span></p>
+      <button id="btnCopy" class="ghost">Copy invite link</button>
+      <ul id="lobbyList"></ul>
+      <button id="btnStart">Start the Night</button>
+      <p id="lobbyWait" class="small">Waiting for the host to start the night...</p>
+      <button id="btnLeave" class="ghost">Leave</button>
+    </div>
+  </div>
+
+  <div id="end" class="screen hidden">
+    <div class="panel">
+      <h1 id="endTitle">6:00 AM</h1>
+      <p id="endText" class="sub"></p>
+      <button id="btnAgain">Back to Lobby</button>
+      <p id="endWait" class="small">Waiting for the host...</p>
+      <button id="btnMenu" class="ghost">Main Menu</button>
+    </div>
+  </div>
+
+  <div id="help" class="screen hidden">
+    <div class="panel wide">
+      <h2>How to play</h2>
+      <ul class="help">
+        <li><b>The story:</b> you're house-sitting for your aunt for three nights at 14 Alder Lane. Every evening you do your chores, go to bed, and wake up in the middle of the night. Each night is worse than the last.</li>
+        <li><b>Chores</b> are listed on the left. Some need you to carry things: take a frozen dinner from the fridge to the microwave, eat at the table, carry your plate to the sink, take the trash bag out to the bin in the back yard, put the laundry away, swap a dead light bulb.</li>
+        <li><b>Doors:</b> every room has a door. Hold E to open or close it, and press Q to lock or unlock the front and back doors. Lock up before bed.</li>
+        <li><b>Lights:</b> there's a light switch by every doorway. Lights help you see, but they also help him see you.</li>
+        <li><b>At night</b> he walks around the house, knocks, looks in the windows, and later cuts the power and tries to get in. Shine your flashlight in his face through a window to scare him off. Fix the power at the fuse box at the end of the hall.</li>
+        <li><b>Planks</b> are in the hall closet when you need them. Hold E at a window or door to board it up (max 3 each).</li>
+        <li><b>If he gets in:</b> run, and hide in a closet or under a bed. If he sees you hide, he'll find you. A friend can help you up if you get caught.</li>
+      </ul>
+      <h2>Controls</h2>
+      <p class="small"><b>WASD</b> move &nbsp;·&nbsp; <b>Mouse</b> look around (click the game first; Esc frees the mouse) &nbsp;·&nbsp; <b>Arrow keys</b> walk and turn &nbsp;·&nbsp; <b>Shift</b> sprint &nbsp;·&nbsp; <b>E / Space / Click</b> (hold) use things &nbsp;·&nbsp; <b>Q</b> lock / second action &nbsp;·&nbsp; <b>G</b> put down what you're holding &nbsp;·&nbsp; <b>F</b> flashlight</p>
+      <p class="small">Play with headphones. Play with friends: one person hosts, everyone else joins with the code.</p>
+      <button id="btnHelpBack">Got it</button>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/sim.js"></script>
+  <script src="js/world3d.js"></script>
+  <script src="js/hud.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
