@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Until 6 AM</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="c" tabindex="0"></canvas>
+
+  <div id="menu" class="screen">
+    <div class="panel">
+      <h1>UNTIL <span>6</span> AM</h1>
+      <p class="sub">Apartment 4B. 11:58 PM.<br>There's someone standing outside. He's been there for an hour.</p>
+      <label class="field">Your name <input id="name" maxlength="12" placeholder="Player" autocomplete="off"></label>
+      <button id="btnHost">Host a Game</button>
+      <div class="row">
+        <input id="code" maxlength="4" placeholder="CODE" autocomplete="off">
+        <button id="btnJoin">Join</button>
+      </div>
+      <button id="btnSolo" class="alt">Play Solo</button>
+      <button id="btnHelp" class="ghost">How to Play</button>
+      <p id="status"></p>
+    </div>
+  </div>
+
+  <div id="lobby" class="screen hidden">
+    <div class="panel">
+      <p class="sub">Room code</p>
+      <div id="lobbyCode">----</div>
+      <p class="small">Friends: open this same page, type the code and press <b>Join</b>.</p>
+      <p class="small link"><span id="lobbyLink"></span></p>
+      <button id="btnCopy" class="ghost">Copy invite link</button>
+      <ul id="lobbyList"></ul>
+      <button id="btnStart">Start the Night</button>
+      <p id="lobbyWait" class="small">Waiting for the host to start the night...</p>
+      <button id="btnLeave" class="ghost">Leave</button>
+    </div>
+  </div>
+
+  <div id="end" class="screen hidden">
+    <div class="panel">
+      <h1 id="endTitle">6:00 AM</h1>
+      <p id="endText" class="sub"></p>
+      <button id="btnAgain">Back to Lobby</button>
+      <p id="endWait" class="small">Waiting for the host...</p>
+      <button id="btnMenu" class="ghost">Main Menu</button>
+    </div>
+  </div>
+
+  <div id="help" class="screen hidden">
+    <div class="panel wide">
+      <h2>How to survive the night</h2>
+      <ul class="help">
+        <li><b>Goal:</b> stay alive until <b>6:00 AM</b> (about 7 minutes). If everyone gets caught, you lose.</li>
+        <li><b>Planks:</b> grab them from the plank piles (hallway &amp; living room) and <b>hold E</b> at a door or window to board it up. Max 3 boards each. You can carry 2 planks.</li>
+        <li><b>The stalker</b> walks around outside and pounds on doors and windows. Each hit breaks boards. Run there and keep nailing boards on!</li>
+        <li><b>The minimap</b> (top right) shows how many boards every entrance has. Red = none. Flashing = it's being attacked or it's broken.</li>
+        <li><b>Flashlight trick:</b> shine your light in his face through a window (one that has fewer than 2 boards) and he'll back off. Boarded-up windows block the light!</li>
+        <li><b>Power:</b> he can cut the power. Hold E at the <b>fuse box</b> in the hallway to turn it back on. He hits harder in the dark.</li>
+        <li><b>If he gets in:</b> run, hide in a closet or under a bed (hold E). If he sees you hide, he'll find you. Shining your flashlight on him slows him down. He leaves after a while. Board up the broken entrance after he leaves!</li>
+        <li><b>Caught?</b> A friend can hold E next to you to help you up.</li>
+        <li><b>Phone:</b> answer the landline when it rings. The caller might tell you where he's coming next...</li>
+        <li><b>Batteries</b> are in the kitchen drawer.</li>
+      </ul>
+      <h2>Controls</h2>
+      <p class="small"><b>WASD / Arrows</b> move &nbsp;·&nbsp; <b>Mouse</b> aim flashlight &nbsp;·&nbsp; <b>Shift</b> sprint &nbsp;·&nbsp; <b>E / Space / Click</b> (hold) interact &nbsp;·&nbsp; <b>F</b> flashlight on/off</p>
+      <p class="small">Play with headphones. Talk to your friends (in person or on a call). Splitting up is usually a good idea... usually.</p>
+      <button id="btnHelpBack">Got it</button>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/sim.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
