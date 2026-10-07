@@ -15,34 +15,44 @@ function txt(g, s, x, y, o = {}) {
   g.font = (o.weight || "bold") + " " + (o.size || 16) + "px " + (o.font || "'Courier New', monospace");
   g.textAlign = o.align || "left";
   g.textBaseline = o.base || "alphabetic";
-  if (o.shadow !== false) { g.fillStyle = "rgba(0,0,0,0.85)"; g.fillText(s, x + 2, y + 2); }
+  const mw = o.maxW > 0 ? o.maxW : undefined;
+  if (o.shadow !== false) { g.fillStyle = "rgba(0,0,0,0.85)"; g.fillText(s, x + 2, y + 2, mw); }
   g.fillStyle = o.color || "#eee";
-  g.fillText(s, x, y);
+  g.fillText(s, x, y, mw);
 }
 
+const ITEM_NAMES = { food: "Frozen dinner", hot: "Hot dinner", plate: "Dirty plate", trash: "Trash bag", bulb: "Light bulb", laundry: "Clean laundry", plank: "Plank" };
+const MAP_X1 = 29, MAP_Y1 = 22; // minimap covers the house and the back yard
+
 function drawMinimap(g, S, me, t) {
-  const s = 6, x0 = R.W - (HOUSE.x1 - HOUSE.x0 + 1) * s - 14, y0 = 14;
-  const w = (HOUSE.x1 - HOUSE.x0 + 1) * s, h = (HOUSE.y1 - HOUSE.y0 + 1) * s;
+  const s = R.W < 760 ? 4 : 6;
+  const cols = MAP_X1 - HOUSE.x0 + 1, rows = MAP_Y1 - HOUSE.y0 + 1;
+  const w = cols * s, h = rows * s, x0 = R.W - w - 14, y0 = 14;
   g.fillStyle = "rgba(0,0,0,0.6)"; g.fillRect(x0 - 6, y0 - 6, w + 12, h + 12);
-  for (let y = HOUSE.y0; y <= HOUSE.y1; y++) for (let x = HOUSE.x0; x <= HOUSE.x1; x++) {
+  for (let y = HOUSE.y0; y <= MAP_Y1; y++) for (let x = HOUSE.x0; x <= MAP_X1; x++) {
     const c = tileAt(x, y);
     const mx = x0 + (x - HOUSE.x0) * s, my = y0 + (y - HOUSE.y0) * s;
-    if (c === "#" || c === "F") g.fillStyle = "#555";
-    else if ("WDB".includes(c)) continue;
-    else if (c === "P") g.fillStyle = "#9b7a50";
-    else if (c === "C" || c === "b") g.fillStyle = "#3a4a5a";
-    else g.fillStyle = "#1c1c22";
+    if (c === "#" || c === "F") g.fillStyle = "#666";
+    else if ("WDB".includes(c) || c === ",") continue;
+    else if (c === "y") g.fillStyle = "#1d2a18";
+    else if (c === "f" || c === "G") g.fillStyle = "#4a3b2c";
+    else if (c === "d") g.fillStyle = S.idoors[IDOOR_AT[x + "," + y]].open ? "#2a2a33" : "#b08d5a";
+    else if (c === ".") {
+      const r = roomAt(x, y), st = r && S.rooms[r.id];
+      g.fillStyle = st && S.power && st.on && st.bulb ? "#3b3426" : "#1c1c22";
+    } else g.fillStyle = "#3a4a5a";
     g.fillRect(mx, my, s, s);
   }
   ENTRIES.forEach((E, i) => {
     const e = S.entries[i];
     const mx = x0 + (E.x - HOUSE.x0) * s, my = y0 + (E.y - HOUSE.y0) * s;
     let col = ["#ff3d3d", "#ff9800", "#ffd600", "#4caf50"][e.boards];
+    if (E.kind === "door" && !e.boards) col = e.open ? "#ff3d3d" : e.locked ? "#4fc3f7" : "#b08d5a";
     if (e.broken) col = Math.floor(t * 4) % 2 ? "#ff00aa" : "#300";
     g.fillStyle = col; g.fillRect(mx - 1, my - 1, s + 2, s + 2);
     if (e.hit > 0) { g.strokeStyle = `rgba(255,255,255,${e.hit})`; g.lineWidth = 2; g.strokeRect(mx - 4, my - 4, s + 8, s + 8); }
   });
-  if (!S.power && Math.floor(t * 3) % 2) { g.fillStyle = "#ffeb3b"; g.fillRect(x0 + (21 - HOUSE.x0) * s - 1, y0 + (11 - HOUSE.y0) * s - 1, s + 2, s + 2); }
+  if (!S.power && Math.floor(t * 3) % 2) { g.fillStyle = "#ffeb3b"; g.fillRect(x0 + (23 - HOUSE.x0) * s - 1, y0 + (13 - HOUSE.y0) * s - 1, s + 2, s + 2); }
   for (const p of Object.values(S.players)) {
     const px = p.id === me.id ? me.x : p.x, py = p.id === me.id ? me.y : p.y;
     g.fillStyle = p.down ? "#888" : p.color;
@@ -53,68 +63,89 @@ function drawMinimap(g, S, me, t) {
       g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + Math.cos(me.a) * 11, cy + Math.sin(me.a) * 11); g.stroke();
     }
   }
-  txt(g, "boards: ", x0 - 4, y0 + h + 22, { size: 12 });
-  ["0", "1", "2", "3"].forEach((n, i) => {
-    g.fillStyle = ["#ff3d3d", "#ff9800", "#ffd600", "#4caf50"][i]; g.fillRect(x0 + 58 + i * 30, y0 + h + 12, 10, 10);
-    txt(g, n, x0 + 72 + i * 30, y0 + h + 22, { size: 12 });
+  let ly = y0 + h + 22;
+  const lx = Math.min(x0 - 4, R.W - 200);
+  if (S.stage === "night" || S.night === 3) {
+    txt(g, "boards: ", lx, ly, { size: 12 });
+    ["0", "1", "2", "3"].forEach((n, i) => {
+      g.fillStyle = ["#ff3d3d", "#ff9800", "#ffd600", "#4caf50"][i]; g.fillRect(lx + 58 + i * 30, ly - 10, 10, 10);
+      txt(g, n, lx + 72 + i * 30, ly, { size: 12 });
+    });
+    ly += 18;
+  }
+  txt(g, "doors: ", lx, ly, { size: 12 });
+  [["#4fc3f7", "locked"], ["#b08d5a", "shut"], ["#ff3d3d", "open"]].forEach(([c, n], i) => {
+    g.fillStyle = c; g.fillRect(lx + 50 + i * 52, ly - 10, 10, 10);
+    txt(g, n, lx + 63 + i * 52, ly, { size: 11 });
   });
-  return y0 + h + 44;
+  return ly + 22;
+}
+
+function drawTasks(g, S, x, y, maxW) {
+  const title = S.stage === "night" ? "TONIGHT" : "CHORES";
+  txt(g, title, x, y, { size: 13, color: "#ffe082" });
+  y += 20;
+  for (const tk of S.tasks) {
+    const locked = tk.id === "bed" && !tk.done && !choresDone(S);
+    txt(g, (tk.done ? "☑ " : "☐ ") + tk.label, x, y, { size: 13, color: tk.done ? "#7f8c7f" : locked ? "#9e9e9e" : "#f5f1e6", maxW });
+    if (tk.done) { g.fillStyle = "rgba(160,190,160,0.7)"; g.fillRect(x + 22, y - 5, Math.min(maxW - 22, g.measureText(tk.label).width), 1.5); }
+    y += 19;
+  }
+  return y;
 }
 
 function drawHUD(g, S, me, G, t) {
   g.setTransform(1, 0, 0, 1, 0, 0);
   const W = R.W, H = R.H;
-  // clock
-  const prog = Math.min(1, S.time / NIGHT_LEN);
-  g.fillStyle = "rgba(0,0,0,0.55)"; g.fillRect(W / 2 - 110, 10, 220, 58);
-  txt(g, clockText(S.time), W / 2, 44, { size: 30, align: "center", color: "#ff5252", font: "'Courier New', monospace" });
-  g.fillStyle = "#333"; g.fillRect(W / 2 - 95, 54, 190, 6);
-  g.fillStyle = "#ff8a65"; g.fillRect(W / 2 - 95, 54, 190 * prog, 6);
-  txt(g, "survive until 6:00 AM", W / 2, 82, { size: 11, align: "center", color: "#aaa" });
+  const cfg = NIGHTS[S.night];
+  // clock (narrow screens: smaller, and centred in the space left of the minimap)
+  const prog = S.stage === "evening" ? Math.min(1, S.mins / 240) : clamp((S.mins - cfg.wake) / (NIGHT_END - cfg.wake), 0, 1);
+  const narrow = W < 760, cw = narrow ? 150 : 220, cx = narrow ? (W - 160) / 2 : W / 2;
+  g.fillStyle = "rgba(0,0,0,0.55)"; g.fillRect(cx - cw / 2, 10, cw, 58);
+  txt(g, clockText(S.mins), cx, 44, { size: narrow ? 22 : 30, align: "center", color: S.stage === "night" ? "#ff5252" : "#ffe7b3", font: "'Courier New', monospace" });
+  g.fillStyle = "#333"; g.fillRect(cx - cw / 2 + 15, 54, cw - 30, 6);
+  g.fillStyle = S.stage === "night" ? "#ff8a65" : "#ffd180"; g.fillRect(cx - cw / 2 + 15, 54, (cw - 30) * prog, 6);
+  txt(g, "NIGHT " + S.night + " · " + cfg.day, cx, 82, { size: 11, align: "center", color: "#bbb" });
 
-  // power
+  // status line, chores, messages (left column)
   let y = 30;
-  if (S.power) txt(g, "⚡ POWER ON", 16, y, { size: 15, color: "#ffe082" });
-  else if (Math.floor(t * 2) % 2 === 0) txt(g, "⚡ POWER OUT! Fix the fuse box (hallway)", 16, y, { size: 15, color: "#ff5252" });
-  y += 22;
-  if (S.phone > 0) { txt(g, "☎ The phone is ringing (kitchen)", 16, y, { size: 13, color: "#b0bec5" }); y += 20; }
-  if (S.tv) { txt(g, "📺 The TV is on... it might attract him", 16, y, { size: 13, color: "#90caf9" }); y += 20; }
-  if (S.stalker.mode === "in") { txt(g, "⚠ HE IS INSIDE", 16, y, { size: 16, color: Math.floor(t * 4) % 2 ? "#ff1744" : "#fff" }); y += 22; }
-
-  // message log
-  y += 6;
+  const colW = Math.max(220, Math.min(460, (narrow ? W - 40 : cx - cw / 2 - 30)));
+  if (!S.power) { if (Math.floor(t * 2) % 2 === 0) txt(g, "⚡ POWER OUT — fuse box at the end of the hall", 16, y, { size: 14, color: "#ff5252", maxW: colW }); y += 22; }
+  if (S.stalker.mode === "in") { txt(g, "⚠ HE IS INSIDE THE HOUSE", 16, y, { size: 15, color: Math.floor(t * 4) % 2 ? "#ff1744" : "#fff" }); y += 22; }
+  if (S.phone > 0) { txt(g, "☎ The landline is ringing (living room)", 16, y, { size: 13, color: "#b0bec5", maxW: colW }); y += 20; }
+  if (narrow) y = Math.max(y, 100);
+  y = drawTasks(g, S, 16, y + 6, colW) + 8;
   for (const m of G.msgs) {
-    const a = Math.min(1, m.t / 1.5);
-    g.globalAlpha = a;
-    txt(g, m.text, 16, y, { size: m.big ? 16 : 13, color: m.c || "#ddd" });
+    g.globalAlpha = Math.min(1, m.t / 1.5);
+    txt(g, m.text, 16, y, { size: m.big ? 15 : 13, color: m.c || "#ddd", maxW: colW });
     g.globalAlpha = 1;
-    y += m.big ? 22 : 18;
+    y += m.big ? 21 : 18;
   }
 
   // minimap + players
   let my = drawMinimap(g, S, me, t);
-  for (const p of Object.values(S.players)) {
+  if (Object.keys(S.players).length > 1) for (const p of Object.values(S.players)) {
     const st = p.down ? "DOWN" : p.hidden ? "hiding" : "";
-    g.fillStyle = p.color; g.fillRect(R.W - 190, my - 9, 10, 10);
-    txt(g, p.name + (p.id === me.id ? " (you)" : "") + (st ? " — " + st : ""), R.W - 174, my, { size: 12, color: p.down ? "#ff8a80" : "#ddd" });
+    g.fillStyle = p.color; g.fillRect(R.W - 200, my - 9, 10, 10);
+    txt(g, p.name + (p.id === me.id ? " (you)" : "") + (st ? " — " + st : ""), R.W - 184, my, { size: 12, color: p.down ? "#ff8a80" : "#ddd" });
     my += 17;
   }
 
-  // phone card (texts from UNKNOWN)
+  // phone card (texts and calls)
   if (G.phoneCard) {
     const c = G.phoneCard, a = Math.min(1, c.t, (8 - c.t) * 4 + 0.001);
     g.globalAlpha = Math.max(0, Math.min(1, a));
-    const cw = 300, cx = R.W - cw - 14, cy = my + 6;
-    g.fillStyle = "rgba(20,20,26,0.95)"; rrect(g, cx, cy, cw, 74, 10); g.fill();
+    const pw = Math.min(300, W - 32), px = R.W - pw - 14, py = my + 6;
+    g.fillStyle = "rgba(20,20,26,0.95)"; rrect(g, px, py, pw, 74, 10); g.fill();
     g.strokeStyle = "#444"; g.lineWidth = 1; g.stroke();
-    txt(g, c.from, cx + 12, cy + 20, { size: 12, color: "#ff5252", shadow: false });
-    wrapText(g, c.text, cx + 12, cy + 40, cw - 24, 16, { size: 13, color: "#eee", shadow: false });
+    txt(g, c.from, px + 12, py + 20, { size: 12, color: "#ff5252", shadow: false });
+    wrapText(g, c.text, px + 12, py + 40, pw - 24, 16, { size: 13, color: "#eee", shadow: false });
     g.globalAlpha = 1;
   }
 
   // bottom-left status
   const bx = 16, by = H - 70;
-  g.fillStyle = "rgba(0,0,0,0.55)"; g.fillRect(bx - 6, by - 22, 230, 80);
+  g.fillStyle = "rgba(0,0,0,0.55)"; g.fillRect(bx - 6, by - 22, 250, 80);
   txt(g, "FLASHLIGHT " + (me.fl ? "ON" : "OFF") + " [F]", bx, by - 6, { size: 12, color: "#ddd" });
   g.fillStyle = "#333"; g.fillRect(bx, by, 150, 8);
   g.fillStyle = me.bat > 25 ? "#ffee58" : "#ff5252"; g.fillRect(bx, by, 150 * me.bat / 100, 8);
@@ -122,23 +153,27 @@ function drawHUD(g, S, me, G, t) {
   txt(g, "STAMINA [Shift]", bx, by + 26, { size: 12, color: "#ddd" });
   g.fillStyle = "#333"; g.fillRect(bx, by + 31, 150, 6);
   g.fillStyle = "#4fc3f7"; g.fillRect(bx, by + 31, 150 * G.stam / 100, 6);
-  txt(g, "PLANKS: " + "▬ ".repeat(me.planks) + (me.planks ? "" : "none"), bx, by + 54, { size: 13, color: "#d7b98a" });
+  const holding = me.carry ? ITEM_NAMES[me.carry] + (me.carry === "plank" ? " ×" + me.carryN : "") + "  [G] put back" : "nothing";
+  txt(g, "HOLDING: " + holding, bx, by + 54, { size: 12, color: me.carry ? "#ffe0a0" : "#999" });
 
   // crosshair + how to look around
+  const ready = G.prompt && ((G.prompt.e && G.prompt.e.can) || (G.prompt.q && G.prompt.q.can));
   if (!me.down && !me.hidden) {
-    g.fillStyle = G.prompt && G.prompt.can ? "rgba(255,230,150,0.95)" : "rgba(255,255,255,0.55)";
-    g.beginPath(); g.arc(W / 2, H / 2, G.prompt && G.prompt.can ? 4 : 2.5, 0, 7); g.fill();
+    g.fillStyle = ready ? "rgba(255,230,150,0.95)" : "rgba(255,255,255,0.55)";
+    g.beginPath(); g.arc(W / 2, H / 2, ready ? 4 : 2.5, 0, 7); g.fill();
   }
-  if (!G.plock) txt(g, "Click to look around with the mouse  ·  arrow keys turn", W / 2, H - 150, { size: 13, align: "center", color: "#cfd8dc" });
+  if (!G.plock) txt(g, G.noLock ? "Drag the mouse to look around  ·  arrow keys turn" : "Click to look around with the mouse  ·  arrow keys turn", W / 2, H - 150, { size: 13, align: "center", color: "#cfd8dc", maxW: W - 32 });
 
-  // interaction prompt
+  // interaction prompt: [E] main action, [Q] second action
   if (G.prompt && !me.down) {
-    const p = G.prompt;
-    const label = (p.can ? "[E] " : "") + p.label;
+    const parts = [];
+    if (G.prompt.e) parts.push({ s: (G.prompt.e.can ? "[E] " : "") + G.prompt.e.label, can: G.prompt.e.can });
+    if (G.prompt.q) parts.push({ s: (G.prompt.q.can ? "[Q] " : "") + G.prompt.q.label, can: G.prompt.q.can });
     g.font = "bold 16px 'Courier New', monospace";
-    const w = g.measureText(label).width + 30;
+    const label = parts.map((p) => p.s).join("     ");
+    const w = Math.min(W - 24, g.measureText(label).width + 30);
     g.fillStyle = "rgba(0,0,0,0.7)"; g.fillRect(W / 2 - w / 2, H - 120, w, 34);
-    txt(g, label, W / 2, H - 97, { size: 16, align: "center", color: p.can ? "#fff" : "#aaa" });
+    txt(g, label, W / 2, H - 97, { size: 16, align: "center", color: parts.some((p) => p.can) ? "#fff" : "#aaa", maxW: W - 40 });
   }
   if (me.act) {
     g.fillStyle = "rgba(0,0,0,0.7)"; g.fillRect(W / 2 - 120, H - 78, 240, 16);
@@ -147,13 +182,37 @@ function drawHUD(g, S, me, G, t) {
   if (me.hidden) txt(g, "You are hiding. Press E to come out.", W / 2, H - 140, { size: 16, align: "center", color: "#90caf9" });
   if (me.down) {
     txt(g, "YOU WERE CAUGHT", W / 2, H / 2 - 20, { size: 34, align: "center", color: "#ff1744" });
-    txt(g, "A friend can help you up — hold E next to you", W / 2, H / 2 + 14, { size: 16, align: "center" });
+    txt(g, "A friend can help you up — hold E next to you", W / 2, H / 2 + 14, { size: 16, align: "center", maxW: W - 32 });
   }
-  // hour banner
-  if (G.banner) {
-    g.globalAlpha = Math.min(1, G.banner.t);
-    txt(g, G.banner.text, W / 2, H * 0.32, { size: 54, align: "center", color: "#ff5252" });
-    if (G.banner.sub) txt(g, G.banner.sub, W / 2, H * 0.32 + 34, { size: 18, align: "center", color: "#ddd" });
+}
+
+// story cards, falling asleep, sunrise
+function drawStory(g, S, G, t) {
+  const W = R.W, H = R.H;
+  if (S.stage === "sleep") {
+    const k = Math.min(1, S.stageT / 1.5);
+    g.fillStyle = `rgba(0,0,0,${k})`; g.fillRect(0, 0, W, H);
+    g.globalAlpha = Math.min(1, Math.max(0, (S.stageT - 1) / 1.2));
+    txt(g, "z  z  z", W / 2, H / 2, { size: 28, align: "center", color: "#8a8fa8" });
+    g.globalAlpha = 1;
+  }
+  if (S.stage === "night" && S.stageT < 2) {
+    g.fillStyle = `rgba(0,0,0,${1 - S.stageT / 2})`; g.fillRect(0, 0, W, H);
+  }
+  if (S.stage === "morning") {
+    g.fillStyle = `rgba(255,214,150,${Math.min(0.55, S.stageT / 4)})`; g.fillRect(0, 0, W, H);
+  }
+  if (G.card) {
+    const c = G.card, a = Math.max(0, Math.min(1, (c.dur - c.t) * 2, c.t));
+    g.globalAlpha = a;
+    const bh = 120 + c.lines.length * 26;
+    const grd = g.createLinearGradient(0, H / 2 - bh, 0, H / 2 + bh);
+    grd.addColorStop(0, "rgba(0,0,0,0)"); grd.addColorStop(0.3, "rgba(0,0,0,0.82)"); grd.addColorStop(0.7, "rgba(0,0,0,0.82)"); grd.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = grd; g.fillRect(0, H / 2 - bh, W, bh * 2);
+    let y = H / 2 - c.lines.length * 13 - 10;
+    txt(g, c.title, W / 2, y, { size: W < 760 ? 28 : 40, align: "center", color: "#ff5252" });
+    y += 40;
+    for (const l of c.lines) { txt(g, l, W / 2, y, { size: W < 760 ? 13 : 17, align: "center", color: "#eee", maxW: W - 40, weight: "normal" }); y += 26; }
     g.globalAlpha = 1;
   }
 }
@@ -223,5 +282,6 @@ function drawOverlay(S, me, G, t) {
   }
   drawNameTags(g, S, me, G);
   drawPost(g, S, me, G, t);
-  if (G.phase === "play") drawHUD(g, S, me, G, t);
+  if (G.phase === "play" && S.stage !== "sleep") drawHUD(g, S, me, G, t);
+  drawStory(g, S, G, t);
 }

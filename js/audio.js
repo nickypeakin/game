@@ -146,11 +146,40 @@ const SFX = (() => {
       for (const [f, o] of [[523, 0], [659, 0.15], [784, 0.3], [1046, 0.5]]) tone(d, t + o, f, 2.0, { type: "triangle", gain: 0.2 });
     },
     grab(d, t) { tone(d, t, 300, 0.08, { type: "triangle", gain: 0.2, freqEnd: 500 }); },
+    // --- house sounds
+    creak(d, t, o) {
+      // a door hinge: a stick-slip buzz through a narrow resonance
+      const dur = (o && o.dur) || rnd(0.5, 0.8);
+      const f = ctx.createBiquadFilter(); f.type = "bandpass"; f.Q.value = 9;
+      f.frequency.setValueAtTime(rnd(700, 1000), t); f.frequency.linearRampToValueAtTime(rnd(1100, 1600), t + dur);
+      f.connect(d);
+      const osc = ctx.createOscillator(); osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(rnd(28, 45), t); osc.frequency.linearRampToValueAtTime(rnd(60, 95), t + dur * 0.6); osc.frequency.linearRampToValueAtTime(rnd(35, 55), t + dur);
+      const g = ctx.createGain(); env(g, t, 0.05, (o && o.gain) || 0.9, dur);
+      osc.connect(g); g.connect(f); osc.start(t); osc.stop(t + dur + 0.1);
+    },
+    creakSoft(d, t) { S.creak(d, t, { dur: 0.35, gain: 0.45 }); },
+    creakHeavy(d, t) { S.creak(d, t, { dur: 1.2, gain: 1.1 }); noise(d, t + 1.0, 0.15, { freq: 300, gain: 0.8 }); },
+    lock(d, t) { noise(d, t, 0.05, { type: "highpass", freq: 2000, gain: 0.8 }); tone(d, t + 0.04, 420, 0.06, { type: "square", gain: 0.12 }); noise(d, t + 0.09, 0.07, { freq: 900, gain: 0.7 }); },
+    rattle(d, t) { for (let i = 0; i < 7; i++) { noise(d, t + i * 0.07, 0.04, { type: "bandpass", freq: 2500, q: 3, gain: 0.9 }); tone(d, t + i * 0.07, 600 + (i % 2) * 120, 0.03, { type: "square", gain: 0.08 }); } },
+    fridge(d, t) { noise(d, t, 0.25, { freq: 400, gain: 0.5, a: 0.03 }); tone(d, t, 80, 0.3, { gain: 0.2 }); },
+    micro(d, t) { S.lock(d, t); tone(d, t + 0.2, 120, 7.5, { type: "sawtooth", gain: 0.04, a: 0.2 }); tone(d, t + 0.2, 240, 7.5, { gain: 0.03, a: 0.2 }); },
+    ding(d, t) { tone(d, t, 1760, 1.2, { gain: 0.35 }); tone(d, t, 2637, 0.8, { gain: 0.12 }); },
+    munch(d, t) { for (let i = 0; i < 9; i++) noise(d, t + i * 0.38 + rnd(0, 0.08), 0.08, { type: "bandpass", freq: rnd(900, 1800), q: 2, gain: 0.5 }); },
+    water(d, t) { noise(d, t, 3.2, { type: "bandpass", freq: 2200, q: 0.6, gain: 0.5, a: 0.15 }); for (let i = 0; i < 12; i++) tone(d, t + rnd(0, 3), rnd(500, 900), 0.05, { gain: 0.06, freqEnd: rnd(900, 1400) }); },
+    rustle(d, t) { for (let i = 0; i < 6; i++) noise(d, t + i * 0.09, 0.12, { type: "highpass", freq: rnd(2500, 5000), gain: 0.6, a: 0.02 }); },
+    bin(d, t) { S.rustle(d, t); noise(d, t + 0.45, 0.2, { freq: 500, gain: 1 }); tone(d, t + 0.45, 110, 0.25, { gain: 0.5, freqEnd: 70 }); },
+    brush(d, t) { for (let i = 0; i < 14; i++) noise(d, t + i * 0.2, 0.12, { type: "bandpass", freq: rnd(3000, 4500), q: 2, gain: 0.4, a: 0.03 }); },
+    flush(d, t) { S.lock(d, t); noise(d, t + 0.1, 2.6, { type: "lowpass", freq: 1400, freqEnd: 300, gain: 0.9, a: 0.2 }); },
+    screw(d, t) { for (let i = 0; i < 5; i++) noise(d, t + i * 0.3, 0.12, { type: "bandpass", freq: 3500, q: 4, gain: 0.4 }); tone(d, t + 1.6, 120, 0.3, { gain: 0.15 }); },
+    switch(d, t) { noise(d, t, 0.025, { type: "highpass", freq: 3000, gain: 0.9 }); tone(d, t, 1800, 0.02, { type: "square", gain: 0.06 }); },
+    tick(d, t) { tone(d, t, 880, 0.18, { type: "triangle", gain: 0.18 }); tone(d, t + 0.09, 1320, 0.25, { type: "triangle", gain: 0.14 }); },
+    sleep(d, t) { for (const [f, o] of [[392, 0], [330, 0.5], [262, 1.0]]) tone(d, t + o, f, 1.4, { gain: 0.12, a: 0.1 }); },
   };
 
   function play(name, vol = 1, pan = 0, delay = 0) {
     if (!ctx || !S[name] || vol < 0.01) return;
-    S[name](bus(vol, pan), ctx.currentTime + 0.01 + delay);
+    S[name](bus(vol, pan), ctx.currentTime + 0.01 + delay, null);
   }
 
   function loopNoise(type, freq, q) {

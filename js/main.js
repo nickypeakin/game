@@ -194,9 +194,9 @@ function hostEmit(e) {
 }
 setEmitter(hostEmit);
 
-function startNight(resumeS) {
+function startNight(resumeS, night) {
   G.inputs = {};
-  G.S = resumeS || newGame(G.lobby);
+  G.S = resumeS || newGame(G.lobby, night || 1);
   broadcast({ t: "start" });
   enterPlay(!!resumeS);
   let last = performance.now(), tick = 0;
@@ -215,15 +215,10 @@ function startNight(resumeS) {
 function enterPlay(resumed) {
   G.phase = "play";
   show(null);
-  G.mySnap = -1; G.rpos = {}; G.msgs = []; G.phoneCard = null; G.scare = 0; G.stam = 100; G.me.fl = true;
-  G.stR = G.S ? { x: G.S.stalker.x, y: G.S.stalker.y, a: G.S.stalker.a } : { x: 1.5, y: 1.5, a: 0 };
-  if (resumed) {
-    addMsg("The game was updated. Your night continues.", "#b0bec5");
-  } else {
-    G.banner = { text: "12:00 AM", sub: "Board up the doors and windows. Survive until 6 AM.", t: 5 };
-    addMsg("Grab planks from the piles and board up the windows & doors!", "#ffe082");
-    addMsg("Shine your flashlight at him through a window to scare him off.", "#80deea");
-  }
+  G.mySnap = -1; G.rpos = {}; G.msgs = []; G.phoneCard = null; G.card = null; G.scare = 0; G.stam = 100;
+  G.stR = G.S ? { x: G.S.stalker.x, y: G.S.stalker.y, a: G.S.stalker.a } : { x: -30, y: -30, a: 0 };
+  G.lastStage = null;
+  if (resumed) addMsg("The game was updated. Your night continues.", "#b0bec5");
   if (G.S && G.S.players[G.myId]) { const p = G.S.players[G.myId]; G.me.x = p.x; G.me.y = p.y; G.mySnap = p.snap; }
   G.me.pitch = 0; lookDX = lookDY = 0;
   if (!resumed && G.S && G.S.players[G.myId]) G.me.a = G.S.players[G.myId].a;
@@ -238,13 +233,14 @@ function showEnd(result) {
     if (G.phase !== "end") return;
     show("end");
     const win = result === "win";
-    $("endTitle").textContent = win ? "6:00 AM" : "HE GOT YOU";
+    const night = G.S ? G.S.night : 1;
+    G.endNight = night;
+    $("endTitle").textContent = win ? "THE END" : "HE GOT YOU";
     $("endTitle").style.color = win ? "#ffd180" : "#ff1744";
-    const alive = G.S ? Object.values(G.S.players).filter((p) => !p.down).map((p) => p.name) : [];
     $("endText").textContent = win
-      ? "The sun is coming up. The figure outside is gone... for now. Survivors: " + (alive.join(", ") || "nobody") + "."
-      : "Nobody made it to sunrise. You held out until " + clockText(G.S ? G.S.time : 0) + " before the last of you went quiet.";
-    $("btnAgain").textContent = NET.peer ? "Back to Lobby" : "Play Again";
+      ? "You made it through all three nights at 14 Alder Lane. Aunt May is home. You're never house-sitting again."
+      : "Night " + night + ". It was " + clockText(G.S ? G.S.mins : 0) + " when the last of you went quiet.";
+    $("btnAgain").textContent = win ? (NET.peer ? "Back to Lobby" : "Play Again") : "Try Night " + night + " Again";
     $("btnAgain").classList.toggle("hidden", G.role !== "host");
     $("endWait").classList.toggle("hidden", G.role === "host");
   }, result === "win" ? 1200 : 2200);
@@ -252,8 +248,10 @@ function showEnd(result) {
 
 function backToLobby() {
   if (G.simTimer) { clearInterval(G.simTimer); G.simTimer = null; }
+  const retry = G.S && G.S.phase === "lose" ? G.S.night : 0;
   G.S = null;
-  if (!NET.peer) { startNight(); return; } // solo: straight into a new night
+  if (retry) { startNight(null, retry); return; } // try the same night again
+  if (!NET.peer) { startNight(); return; } // solo: straight into a new game
   G.phase = "lobby";
   renderLobby(); show("lobby");
   broadcastLobby(true);
@@ -312,8 +310,17 @@ function onEvent(e) {
       if (e.id === G.myId) { G.scare = 1.4; SFX.play("scream", 1.2); }
       else { posPlay("scream", e.x, e.y, 0.8); addMsg(e.name + " WAS CAUGHT! Go help them up!", "#ff1744", true); }
       break;
-    case "hour": SFX.play("chime", 0.8); G.banner = { text: e.h + ":00 AM", sub: ["", "He's getting restless.", "Halfway there.", "He's getting angrier.", "Almost dawn...", "Last hour. Hold on!"][e.h], t: 3.5 }; break;
-    case "win": SFX.play("win", 1); G.banner = { text: "6:00 AM", sub: "The sun is rising. You survived.", t: 5 }; break;
+    case "card": G.card = { title: e.title, lines: e.lines, t: e.t || 6, dur: e.t || 6 }; break;
+    case "task": SFX.play("tick", 0.7); addMsg("✓ Done: " + e.text, "#a5d6a7"); break;
+    case "creak": posPlay(e.heavy ? "creakHeavy" : e.soft ? "creakSoft" : "creak", e.x, e.y, e.slow ? 1.3 : 1); break;
+    case "lock": case "rattle": case "fridge": case "micro": case "ding": case "munch": case "water": case "rustle":
+    case "bin": case "brush": case "flush": case "screw": case "switch":
+      posPlay(e.k, e.x, e.y, 1);
+      break;
+    case "sleep": SFX.play("sleep", 0.8); break;
+    case "wake": SFX.play("chime", 0.5); break;
+    case "morning": SFX.play("win", 0.8); break;
+    case "win": SFX.play("win", 1); break;
     case "lose": break;
   }
 }
@@ -321,7 +328,7 @@ function onEvent(e) {
 // ------------------------------- input -------------------------------------
 const keys = {};
 const LOOK_SENS = 0.0026;
-let mouseDown = false, dragging = false, lookDX = 0, lookDY = 0;
+let mouseDown = false, dragging = false, dragDist = 0, lookDX = 0, lookDY = 0;
 addEventListener("keydown", (e) => {
   if (G.phase !== "play" && G.phase !== "end") return;
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
@@ -336,34 +343,44 @@ function requestLook() {
   if (G.phase !== "play" || G.plock || !R.gl.requestPointerLock) return;
   try {
     const p = R.gl.requestPointerLock();
-    if (p && p.catch) p.catch(() => {});
-  } catch (e) {}
+    if (p && p.catch) p.catch(() => { G.noLock = true; });
+  } catch (e) { G.noLock = true; }
 }
 function releaseLook() {
   try { if (document.pointerLockElement) document.exitPointerLock(); } catch (e) {}
 }
-document.addEventListener("pointerlockchange", () => { G.plock = document.pointerLockElement === R.gl; if (!G.plock) mouseDown = false; });
+document.addEventListener("pointerlockchange", () => {
+  G.plock = document.pointerLockElement === R.gl;
+  if (G.plock) { G.noLock = false; dragging = false; }
+  else mouseDown = false;
+});
+document.addEventListener("pointerlockerror", () => { G.noLock = true; });
 addEventListener("mousemove", (e) => {
   if (G.phase !== "play") return;
   // some browsers report a huge jump on the first event after locking
   const mx = e.movementX || 0, my = e.movementY || 0;
   if (Math.abs(mx) > 250 || Math.abs(my) > 250) return;
   if (G.plock || dragging) { lookDX += mx; lookDY += my; }
+  if (dragging && !G.plock) {
+    dragDist += Math.abs(mx) + Math.abs(my);
+    if (dragDist > 8) mouseDown = false; // it's a drag to look, not a click to interact
+  }
 });
 addEventListener("mousedown", (e) => {
   if (G.phase !== "play" || e.button !== 0 || e.target !== R.gl) return;
-  if (G.plock) mouseDown = true;
-  else { dragging = true; requestLook(); }
+  mouseDown = true;
+  if (!G.plock) { dragging = true; dragDist = 0; requestLook(); }
 });
 addEventListener("mouseup", () => { mouseDown = false; dragging = false; });
 
 function myInput() {
-  return { t: "in", x: G.me.x, y: G.me.y, a: G.me.a, pt: G.me.pitch, fl: G.me.fl, e: !!(keys.KeyE || keys.Space || mouseDown) };
+  return { t: "in", x: G.me.x, y: G.me.y, a: G.me.a, pt: G.me.pitch, fl: G.me.fl, e: !!(keys.KeyE || keys.Space || mouseDown), q: !!keys.KeyQ, g: !!keys.KeyG };
 }
 
 function updateLocal(dt, now) {
   const S = G.S, p = S && S.players[G.myId];
   if (!p || S.phase !== "play" || G.phase !== "play") return;
+  if (S.stage === "sleep") { lookDX = lookDY = 0; return; }
   // looking around
   G.me.a += lookDX * LOOK_SENS;
   G.me.pitch = clamp((G.me.pitch || 0) - lookDY * LOOK_SENS, -1.3, 1.3);
@@ -386,7 +403,7 @@ function updateLocal(dt, now) {
   if (moving) {
     const l = Math.hypot(mx, my), spd = (sprint ? SPRINT : WALK) * (p.planks > 0 ? 0.9 : 1);
     const ox = G.me.x, oy = G.me.y;
-    moveCircle(G.me, mx / l * spd * dt, my / l * spd * dt, PR, playerSolid);
+    moveCircle(G.me, mx / l * spd * dt, my / l * spd * dt, PR, playerSolidFn(S));
     const stepped = Math.hypot(G.me.x - ox, G.me.y - oy);
     G.stepDist += stepped;
     G.bobPhase = (G.bobPhase || 0) + stepped * 5.5;
@@ -398,7 +415,7 @@ function updateLocal(dt, now) {
 // ------------------------------ main loop ----------------------------------
 let lastT = performance.now();
 function frame(nowMs) {
-  const now = nowMs / 1000, dt = Math.min(0.05, (nowMs - lastT) / 1000);
+  const now = nowMs / 1000, rawDt = Math.max(0, (nowMs - lastT) / 1000), dt = Math.min(0.05, rawDt);
   lastT = nowMs;
   if ((G.phase === "play" || G.phase === "end") && G.S) {
     updateLocal(dt, now);
@@ -411,9 +428,9 @@ function frame(nowMs) {
     if (sp && sp.snap !== G.mySnap) { G.me.x = sp.x; G.me.y = sp.y; G.mySnap = sp.snap; }
     const me = Object.assign({}, sp || { id: G.myId, name: G.name, color: "#fff", bat: 0, planks: 0 }, { x: G.me.x, y: G.me.y, a: G.me.a, pitch: G.me.pitch || 0, fl: G.me.fl });
     G.prompt = sp && !sp.down && !sp.hidden ? findTarget(S, me) : null;
-    renderGame(S, me, G, now, dt);
+    renderGame(S, me, G, now, rawDt);
   } else {
-    renderMenu(now, dt);
+    renderMenu(now, rawDt);
   }
   requestAnimationFrame(frame);
 }
@@ -433,7 +450,13 @@ function tickEffects(dt, now) {
   for (const m of G.msgs) m.t -= dt;
   G.msgs = G.msgs.filter((m) => m.t > 0);
   if (G.phoneCard && (G.phoneCard.t -= dt) <= 0) G.phoneCard = null;
-  if (G.banner && (G.banner.t -= dt) <= 0) G.banner = null;
+  if (G.card && (G.card.t -= dt) <= 0) G.card = null;
+  // flashlight off for the cosy evening, on when something wakes you
+  if (S.stage !== G.lastStage) {
+    if (S.stage === "evening") G.me.fl = false;
+    if (S.stage === "night") G.me.fl = true;
+    G.lastStage = S.stage;
+  }
   if (G.phantom && (G.phantom.t -= dt) <= 0) G.phantom = null;
   G.scare = Math.max(0, G.scare - dt);
   G.shake = Math.max(0, G.shake - dt * 25);
@@ -447,11 +470,11 @@ function tickEffects(dt, now) {
   G.dread += ((inside ? 0.6 + heart * 0.4 : heart * 0.6) - G.dread) * Math.min(1, dt * 2);
   G.stingerCD -= dt;
   if (d < 7 && G.stingerCD <= 0 && los(S, G.me.x, G.me.y, sr.x, sr.y)) { SFX.play("stinger", 0.6); G.stingerCD = 15; }
-  const tvD = Math.hypot(27.5 - G.me.x, 15.5 - G.me.y), phD = Math.hypot(16.5 - G.me.x, 15.5 - G.me.y);
+  const tvD = Math.hypot(10 - G.me.x, 15.5 - G.me.y), phD = Math.hypot(15.5 - G.me.x, 20.5 - G.me.y);
   SFX.update(dt, {
     playing: G.phase === "play", power: S.power, dread: G.dread, heart: G.phase === "play" ? heart : 0,
-    tvVol: S.tv ? 0.25 / (1 + tvD * 0.3) : 0, tvPan: panFor(28, 15.5),
-    ringVol: S.phone > 0 ? 1 / (1 + phD * 0.15) : 0, ringPan: panFor(16.5, 15.5),
+    tvVol: S.tv && S.power ? 0.25 / (1 + tvD * 0.3) : 0, tvPan: panFor(10, 15.5),
+    ringVol: S.phone > 0 ? 1 / (1 + phD * 0.15) : 0, ringPan: panFor(15.5, 20.5),
   });
 }
 
@@ -490,6 +513,9 @@ function boot(saved) {
     if (navigator.clipboard && link) navigator.clipboard.writeText(link).then(() => { $("btnCopy").textContent = "Copied!"; setTimeout(() => ($("btnCopy").textContent = "Copy invite link"), 1500); }).catch(() => {});
   };
   show("menu");
+  if (window.matchMedia && matchMedia("(pointer: coarse)").matches && !matchMedia("(any-pointer: fine)").matches) {
+    status("This game needs a keyboard and a mouse or trackpad (a Chromebook or computer works).", true);
+  }
   if (!R.ok) {
     status(R.err || "Your browser couldn't start 3D graphics.", true);
     for (const id of ["btnHost", "btnJoin", "btnSolo"]) $(id).disabled = true;
@@ -498,7 +524,12 @@ function boot(saved) {
   // Pick a solo night back up after the page is hot-reloaded
   if (saved && saved.S && saved.S.phase === "play") {
     SFX.init();
+    // browsers keep audio paused until the player touches a key or the mouse again
+    const unlock = () => { SFX.init(); removeEventListener("pointerdown", unlock); removeEventListener("keydown", unlock); };
+    addEventListener("pointerdown", unlock);
+    addEventListener("keydown", unlock);
     G.role = "host"; G.myId = "host"; G.name = saved.name || "Player"; G.lobby = saved.lobby || [];
+    $("name").value = G.name;
     startNight(saved.S);
     if (saved.me) Object.assign(G.me, saved.me);
   }
