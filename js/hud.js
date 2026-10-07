@@ -117,9 +117,8 @@ function drawHUD(g, S, me, G, t) {
   y = drawTasks(g, S, 16, y + 6, colW) + 8;
   for (const m of G.msgs) {
     g.globalAlpha = Math.min(1, m.t / 1.5);
-    txt(g, m.text, 16, y, { size: m.big ? 15 : 13, color: m.c || "#ddd", maxW: colW });
+    y = wrapText(g, m.text, 16, y, colW, m.big ? 20 : 17, { size: m.big ? 15 : 13, color: m.c || "#ddd" }) + (m.big ? 21 : 18);
     g.globalAlpha = 1;
-    y += m.big ? 21 : 18;
   }
 
   // minimap + players
@@ -131,17 +130,6 @@ function drawHUD(g, S, me, G, t) {
     my += 17;
   }
 
-  // phone card (texts and calls)
-  if (G.phoneCard) {
-    const c = G.phoneCard, a = Math.min(1, c.t, (8 - c.t) * 4 + 0.001);
-    g.globalAlpha = Math.max(0, Math.min(1, a));
-    const pw = Math.min(300, W - 32), px = R.W - pw - 14, py = my + 6;
-    g.fillStyle = "rgba(20,20,26,0.95)"; rrect(g, px, py, pw, 74, 10); g.fill();
-    g.strokeStyle = "#444"; g.lineWidth = 1; g.stroke();
-    txt(g, c.from, px + 12, py + 20, { size: 12, color: "#ff5252", shadow: false });
-    wrapText(g, c.text, px + 12, py + 40, pw - 24, 16, { size: 13, color: "#eee", shadow: false });
-    g.globalAlpha = 1;
-  }
 
   // bottom-left status
   const bx = 16, by = H - 70;
@@ -178,12 +166,51 @@ function drawHUD(g, S, me, G, t) {
   if (me.act) {
     g.fillStyle = "rgba(0,0,0,0.7)"; g.fillRect(W / 2 - 120, H - 78, 240, 16);
     g.fillStyle = "#ffca28"; g.fillRect(W / 2 - 118, H - 76, 236 * Math.min(1, me.act.t / me.act.dur), 12);
+    if (me.act.dur > 1) txt(g, "walk away to stop", W / 2, H - 50, { size: 11, align: "center", color: "#aaa" });
   }
   if (me.hidden) txt(g, "You are hiding. Press E to come out.", W / 2, H - 140, { size: 16, align: "center", color: "#90caf9" });
   if (me.down) {
     txt(g, "YOU WERE CAUGHT", W / 2, H / 2 - 20, { size: 34, align: "center", color: "#ff1744" });
-    txt(g, "A friend can help you up — hold E next to you", W / 2, H / 2 + 14, { size: 16, align: "center", maxW: W - 32 });
+    txt(g, "A friend can help you up — press E next to you", W / 2, H / 2 + 14, { size: 16, align: "center", maxW: W - 32 });
   }
+}
+
+// a text message drops in from the top of the screen, like a phone notification
+function drawNote(g, G) {
+  const n = G.notes && G.notes[0];
+  if (!n) return;
+  const W = R.W, nw = Math.min(440, W - 32), nh = 70;
+  const k = n.t < 0.35 ? n.t / 0.35 : n.t > 5.6 ? Math.max(0, (6 - n.t) / 0.4) : 1;
+  const ease = 1 - Math.pow(1 - k, 3);
+  const x = (W - nw) / 2, y = -nh - 10 + ease * (nh + 22);
+  g.save();
+  g.shadowColor = "rgba(0,0,0,0.6)"; g.shadowBlur = 18;
+  g.fillStyle = "rgba(242,242,247,0.96)"; rrect(g, x, y, nw, nh, 16); g.fill();
+  g.restore();
+  // the green messages icon
+  g.fillStyle = "#34c759"; rrect(g, x + 12, y + 12, 22, 22, 6); g.fill();
+  g.fillStyle = "#fff"; g.beginPath(); g.ellipse(x + 23, y + 22, 7, 5.5, 0, 0, 7); g.fill();
+  g.beginPath(); g.moveTo(x + 18, y + 25); g.lineTo(x + 16, y + 30); g.lineTo(x + 22, y + 26); g.fill();
+  txt(g, "MESSAGES", x + 42, y + 27, { size: 11, color: "#6b6b70", shadow: false, font: "system-ui, sans-serif" });
+  txt(g, "now", x + nw - 14, y + 27, { size: 11, color: "#8e8e93", shadow: false, align: "right", font: "system-ui, sans-serif" });
+  txt(g, n.from, x + 42, y + 45, { size: 14, color: "#111", shadow: false, font: "system-ui, sans-serif" });
+  txt(g, n.text, x + 42, y + 62, { size: 13, color: "#222", shadow: false, weight: "normal", font: "system-ui, sans-serif", maxW: nw - 56 });
+}
+
+// on the landline: the caller's words appear as subtitles while you hold the handset
+function drawCall(g, G) {
+  const c = G.call;
+  if (!c) return;
+  const W = R.W, H = R.H, bw = Math.min(620, W - 32), bx = (W - bw) / 2, by = H - 220;
+  const a = Math.min(1, c.t * 3, (c.dur - c.t) * 2);
+  g.globalAlpha = Math.max(0, a);
+  g.fillStyle = "rgba(0,0,0,0.75)"; rrect(g, bx, by, bw, 76, 8); g.fill();
+  txt(g, "☎ LANDLINE · unknown caller", bx + 16, by + 22, { size: 12, color: "#ff8a80" });
+  const shown = c.t < 1.3 ? "" : c.text.slice(0, Math.floor((c.t - 1.3) * 16));
+  let line = c.t < 1.3 ? "(breathing)" : shown;
+  if (c.t > c.dur - 1) line = "*click*  The line went dead.";
+  wrapText(g, line, bx + 16, by + 48, bw - 32, 18, { size: 15, color: "#f2f2f2", weight: "normal" });
+  g.globalAlpha = 1;
 }
 
 // story cards, falling asleep, sunrise
@@ -227,6 +254,7 @@ function wrapText(g, s, x, y, maxW, lh, o) {
     else line = test;
   }
   if (line) txt(g, line, x, y, o);
+  return y;
 }
 
 function drawPost(g, S, me, G, t) {
@@ -282,6 +310,7 @@ function drawOverlay(S, me, G, t) {
   }
   drawNameTags(g, S, me, G);
   drawPost(g, S, me, G, t);
-  if (G.phase === "play" && S.stage !== "sleep") drawHUD(g, S, me, G, t);
+  if (G.phase === "play" && S.stage !== "sleep") { drawHUD(g, S, me, G, t); drawCall(g, G); }
   drawStory(g, S, G, t);
+  drawNote(g, G);
 }

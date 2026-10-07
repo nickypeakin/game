@@ -17,9 +17,9 @@ const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 
 // ------------------------------ the nights ---------------------------------
 const NIGHTS = {
-  1: { day: "MONDAY", wake: 407, nightLen: 140, aggr: 1, eveningAggr: 0, closetPlanks: 0, nightPlanks: 4 },
-  2: { day: "TUESDAY", wake: 432, nightLen: 190, aggr: 2, eveningAggr: 0, closetPlanks: 0, nightPlanks: 10 },
-  3: { day: "WEDNESDAY", wake: 358, nightLen: 230, aggr: 3, eveningAggr: 1, closetPlanks: 16, nightPlanks: 10 },
+  1: { day: "MONDAY", wake: 407, nightLen: 210, aggr: 1, eveningAggr: 0, closetPlanks: 0, nightPlanks: 4 },
+  2: { day: "TUESDAY", wake: 432, nightLen: 250, aggr: 2, eveningAggr: 0, closetPlanks: 0, nightPlanks: 10 },
+  3: { day: "WEDNESDAY", wake: 358, nightLen: 290, aggr: 3, eveningAggr: 1, closetPlanks: 16, nightPlanks: 10 },
 };
 const TASK_LABELS = {
   eat: "Heat up a dinner from the fridge and eat it",
@@ -172,14 +172,14 @@ function completeTask(S, id) {
 
 // What can player p interact with right now? Used by the host (to do it) and
 // by every client (to show the prompt). Returns {e, q} actions or null.
-function findTarget(S, p) {
-  let best = null, bestScore = 1e9;
+function allSpots(S, p) {
+  const spots = [];
   const consider = (spot, d) => {
     if (!spot || (!spot.e && !spot.q)) return;
     const da = Math.abs(angDiff(Math.atan2(spot.ty - p.y, spot.tx - p.x), p.a));
     const can = (spot.e && spot.e.can) || (spot.q && spot.q.can);
-    const score = d + da * 0.35 + (can ? 0 : 0.3);
-    if (score < bestScore) { bestScore = score; best = spot; }
+    spot.score = d + da * 0.35 + (can ? 0 : 0.3);
+    spots.push(spot);
   };
   for (const q of Object.values(S.players)) {
     if (q.id === p.id || !q.down) continue;
@@ -212,7 +212,17 @@ function findTarget(S, p) {
     const spot = tileSpot(S, p, c, tx, ty);
     if (spot) { spot.tx = tx + 0.5; spot.ty = ty + 0.5; consider(spot, d); }
   }
+  return spots;
+}
+function findTarget(S, p) {
+  let best = null;
+  for (const s of allSpots(S, p)) if (!best || s.score < best.score) best = s;
   return best;
+}
+// is this particular action still within reach? (lets a started action keep going)
+function findAction(S, p, key, which) {
+  for (const s of allSpots(S, p)) { const a = s[which]; if (a && a.key === key && a.can) return { a, spot: s }; }
+  return null;
 }
 
 const doAct = (key, kind, label, dur, ref) => ({ key, kind, label, dur, ref, can: true });
@@ -333,7 +343,7 @@ function newGame(lobby, night) {
   lobby.forEach((L, i) => {
     S.players[L.id] = {
       id: L.id, name: L.name, color: L.color, x: 0, y: 0, a: 0, pt: 0, fl: true, bat: 100, carry: null, carryN: 0,
-      down: false, hidden: false, hideX: 0, hideY: 0, snap: 0, act: null, needRel: false, seenHide: false, hamT: 0, gHeld: false,
+      down: false, hidden: false, hideX: 0, hideY: 0, snap: 0, act: null, seenHide: false, hamT: 0, press: {},
     };
   });
   setupEvening(S);
@@ -344,7 +354,7 @@ function placePlayers(S, spots, a) {
   Object.values(S.players).forEach((p, i) => {
     const s = spots[i % spots.length];
     p.x = s[0]; p.y = s[1]; p.a = a; p.snap++;
-    p.down = false; p.hidden = false; p.act = null; p.carry = null; p.carryN = 0; p.needRel = false;
+    p.down = false; p.hidden = false; p.act = null; p.carry = null; p.carryN = 0;
   });
 }
 
@@ -364,8 +374,8 @@ function setupEvening(S) {
   S.dir = { t: 0, fired: {}, doneAt: {} };
   S.aggr = cfg.eveningAggr; S.nextTarget = -1;
   S.stalker = newStalker();
-  if (S.aggr > 0) { S.stalker.x = 1.5; S.stalker.y = 1.5; S.stalker.state = "wander"; S.stalker.timer = 25; }
-  S.nextEvent = S.aggr > 0 ? 30 : 9999;
+  if (S.aggr > 0) { S.stalker.x = 1.5; S.stalker.y = 1.5; S.stalker.state = "wander"; S.stalker.timer = 70; }
+  S.nextEvent = S.aggr > 0 ? 80 : 9999;
   S.powerCD = 9999;
   for (const p of Object.values(S.players)) p.bat = 100;
   placePlayers(S, EVENING_SPOTS, -Math.PI / 2);
@@ -388,8 +398,8 @@ function startNightStage(S) {
   S.dir = { t: 0, fired: {}, doneAt: {} };
   S.aggr = cfg.aggr; S.nextTarget = -1;
   const st = S.stalker = newStalker();
-  st.x = 3.5; st.y = 27.5; st.state = "wander"; st.timer = S.night === 3 ? 2 : 10;
-  S.nextEvent = 25; S.powerCD = S.night >= 2 ? 50 : 9999;
+  st.x = 3.5; st.y = 27.5; st.state = "wander"; st.timer = S.night === 3 ? 8 : 30;
+  S.nextEvent = 50; S.powerCD = S.night >= 2 ? 80 : 9999;
   placePlayers(S, WAKE_SPOTS, Math.PI / 2);
   emit({ k: "wake" });
 }
@@ -441,7 +451,7 @@ function simStep(S, inputs, dt) {
   if (S.stage === "sleep") { if (S.stageT > 5) startNightStage(S); return; }
   if (S.stage === "morning") { if (S.stageT > 9) nextNight(S); return; }
   S.dir.t += dt;
-  if (S.stage === "evening") S.mins = Math.min(235, S.mins + dt / 1.3);
+  if (S.stage === "evening") S.mins = Math.min(235, S.mins + dt / 2);
   else {
     const cfg = NIGHTS[S.night];
     S.mins += dt * (NIGHT_END - cfg.wake) / cfg.nightLen;
@@ -501,30 +511,40 @@ function updatePlayers(S, inputs, dt) {
       if (typeof inp.a === "number") p.a = inp.a;
       if (typeof inp.pt === "number") p.pt = clamp(inp.pt, -1.4, 1.4);
       p.fl = !!inp.fl;
-      // drop whatever you're carrying (G)
-      if (inp.g && !p.gHeld && p.carry && !p.down) dropItem(S, p);
-      p.gHeld = !!inp.g;
     }
+    p.press = p.press || {};
+    const pressed = (k) => {
+      if (!inp || typeof inp[k] !== "number") return false;
+      const last = p.press[k];
+      p.press[k] = inp[k];
+      return last !== undefined && inp[k] !== last;
+    };
+    const pe = pressed("ep"), pq = pressed("qp"), pg = pressed("gp");
+    if (pg && p.carry && !p.down) dropItem(S, p);
     if (flashOn(p)) p.bat = Math.max(0, p.bat - dt * 0.45);
-    const wantE = inp && inp.e, wantQ = inp && inp.q;
-    const held = wantE || wantQ;
-    if (!held || p.down) { p.act = null; p.needRel = false; continue; }
-    if (p.needRel) continue;
-    if (p.hidden) {
-      p.hidden = false; p.seenHide = false; p.needRel = true;
-      emit({ k: "creak", x: p.hideX, y: p.hideY, soft: true });
-      continue;
+    if (p.down) { p.act = null; continue; }
+    if (pe || pq) {
+      if (p.hidden) {
+        p.hidden = false; p.seenHide = false; p.act = null;
+        emit({ k: "creak", x: p.hideX, y: p.hideY, soft: true });
+        continue;
+      }
+      const which = pe ? "e" : "q";
+      const spot = findTarget(S, p);
+      const a = spot && spot[which];
+      if (a && a.can && !(p.act && p.act.key === a.key)) p.act = { key: a.key, label: a.label, t: 0, dur: a.dur, which };
     }
-    const spot = findTarget(S, p);
-    const a = spot && (wantE ? spot.e : spot.q);
-    if (!a || !a.can) { p.act = null; continue; }
-    if (!p.act || p.act.key !== a.key) p.act = { key: a.key, label: a.label, t: 0, dur: a.dur };
-    p.act.t += dt;
-    if (a.kind === "board") {
-      p.hamT -= dt;
-      if (p.hamT <= 0) { p.hamT = 0.38; emit({ k: "hammer", x: spot.tx, y: spot.ty }); }
+    if (p.act) {
+      // keeps going on its own; walking away cancels it
+      const f = findAction(S, p, p.act.key, p.act.which);
+      if (!f) { p.act = null; continue; }
+      p.act.t += dt;
+      if (f.a.kind === "board") {
+        p.hamT -= dt;
+        if (p.hamT <= 0) { p.hamT = 0.38; emit({ k: "hammer", x: f.spot.tx, y: f.spot.ty }); }
+      }
+      if (p.act.t >= p.act.dur) { completeAction(S, p, f.a, f.spot); p.act = null; }
     }
-    if (p.act.t >= p.act.dur) { completeAction(S, p, a, spot); p.act = null; p.needRel = true; }
   }
 }
 
@@ -633,8 +653,8 @@ function completeAction(S, p, a, spot) {
         S.nextTarget = i;
         text = "...(breathing)... the " + ENTRIES[i].name.toLowerCase() + ". that's where i'm coming in.";
       }
-      emit({ k: "call", to: p.id, text: text || "...(slow breathing)..." });
-      emit({ k: "msg", text: p.name + " answered the phone...", c: "#b0bec5" });
+      emit({ k: "call", to: p.id, text: text || "..." });
+      emit({ k: "msg", text: p.name + " picked up the landline...", c: "#b0bec5" });
       S.phoneMsg = null;
       break;
     }
@@ -667,7 +687,7 @@ const textMsg = (text) => () => emit({ k: "text", text });
 const anyPlayer = (S, f) => Object.values(S.players).some((p) => !p.down && f(p));
 const nearWindow = (S, key, r) => { const E = ENTRIES[ENTRY_AT[key]]; return anyPlayer(S, (p) => Math.hypot(p.x - E.ix, p.y - E.iy) < r); };
 
-function ring(S, msg) { if (S.phone <= 0) { S.phone = 16; S.phoneMsg = msg; emit({ k: "msg", text: "The landline is ringing in the living room...", c: "#b0bec5" }); } }
+function ring(S, msg) { if (S.phone <= 0) { S.phone = 24; S.phoneMsg = msg; emit({ k: "msg", text: "The landline is ringing in the living room...", c: "#b0bec5" }); } }
 function knockAt(S, i, heavy) { const E = ENTRIES[i]; emit({ k: heavy ? "bang" : "knock", x: E.x + 0.5, y: E.y + 0.5 }); if (heavy) S.entries[i].hit = 1; }
 function watch(S, x, y, dur, seenMsg) {
   const st = S.stalker;
@@ -679,41 +699,41 @@ function goAway(S) { Object.assign(S.stalker, { mode: "out", state: "away", x: -
 const STORY = {
   "1evening": [
     { at: 0.3, fn: () => emit({ k: "card", title: "NIGHT 1 — MONDAY", lines: ["You're house-sitting for your aunt May at 14 Alder Lane.", "She left a list of chores. It's a quiet street.", "Mostly."], t: 7 }) },
-    { at: 8, fn: say("Your chores are listed on the left. Start with dinner: frozen meals are in the fridge.", "#ffe082") },
-    { at: 40, fn: textMsg("hey neighbor :) welcome to alder lane") },
-    { after: "eat", delay: 7, fn: (S) => { if (!S.tv) { S.tv = true; emit({ k: "click", x: 10, y: 15.5 }); } say("The TV turned itself on. Weird.")(); } },
+    { at: 10, fn: say("Your chores are listed on the left. Start with dinner: frozen meals are in the fridge.", "#ffe082") },
+    { at: 95, fn: textMsg("hey neighbor :) welcome to alder lane") },
+    { after: "eat", delay: 30, fn: (S) => { if (!S.tv) { S.tv = true; emit({ k: "click", x: 10, y: 15.5 }); } say("The TV turned itself on. Weird.")(); } },
     { id: "yard", when: (S) => anyPlayer(S, (p) => inYard(p.x, p.y)) && !taskDone(S, "trash"), fn: (S) => watch(S, 26.5, 24.6, 12, "...was someone standing past the fence?") },
-    { id: "knock", after: "teeth", delay: 4, fn: (S) => { knockAt(S, FRONT_DOOR); say("Someone's knocking at the front door. At this hour?")(); } },
-    { after: "teeth", delay: 16, fn: textMsg("nice pajamas") },
+    { id: "knock", after: "teeth", delay: 14, fn: (S) => { knockAt(S, FRONT_DOOR); say("Someone's knocking at the front door. At this hour?")(); } },
+    { after: "teeth", delay: 45, fn: textMsg("nice pajamas") },
   ],
   "1night": [
     { at: 0.5, fn: (S) => { knockAt(S, FRONT_DOOR, true); emit({ k: "card", title: "2:47 AM", lines: ["Something woke you up.", "Three slow knocks on the front door."], t: 5 }); } },
-    { at: 45, fn: (S) => ring(S, "...you looked so peaceful sleeping.") },
-    { at: 85, fn: (S) => emit({ k: "scratch", x: 10.5, y: 6.5 }) },
+    { at: 75, fn: (S) => ring(S, "...you looked so peaceful sleeping.") },
+    { at: 140, fn: (S) => emit({ k: "scratch", x: 10.5, y: 6.5 }) },
   ],
   "2evening": [
     { at: 0.3, fn: () => emit({ k: "card", title: "NIGHT 2 — TUESDAY", lines: ["Aunt May called: \"Mrs. Pell next door saw a man in a white mask on our lawn last night.\"", "\"Lock everything. I'll be home Thursday.\"", "The bathroom light is dead."], t: 8 }) },
-    { at: 26, fn: textMsg("you forgot to close the bathroom blinds last night") },
-    { at: 55, fn: (S) => { if (S.power) { S.flick = 2.5; emit({ k: "flicker" }); } } },
-    { id: "street", when: (S) => S.dir.t > 35 && (nearWindow(S, "10,21", 3.5) || nearWindow(S, "7,19", 3.5)), fn: (S) => watch(S, 10.5, 24.9, 14, "He was standing under the streetlight. Staring at the house.") },
-    { after: "laundry", delay: 4, fn: (S) => {
+    { at: 60, fn: textMsg("you forgot to close the bathroom blinds last night") },
+    { at: 130, fn: (S) => { if (S.power) { S.flick = 2.5; emit({ k: "flicker" }); } } },
+    { id: "street", when: (S) => S.dir.t > 90 && (nearWindow(S, "10,21", 3.5) || nearWindow(S, "7,19", 3.5)), fn: (S) => watch(S, 10.5, 24.9, 14, "He was standing under the streetlight. Staring at the house.") },
+    { after: "laundry", delay: 12, fn: (S) => {
       const e = S.entries[BACK_DOOR];
       emit({ k: "rattle", x: 23.5, y: 18.5 });
       if (!e.locked && !e.open && !e.boards) { e.open = true; emit({ k: "creak", x: 23.5, y: 18.5, heavy: true }); say("The back door just swung open by itself...", "#ff8a80")(); }
       else say("Someone just tried the back door handle.", "#ff8a80")();
     } },
-    { after: "dishes", delay: 5, fn: (S) => ring(S, "...what's for dessert?") },
+    { after: "dishes", delay: 25, fn: (S) => ring(S, "...what's for dessert?") },
     { id: "gate", when: (S) => anyPlayer(S, (p) => inYard(p.x, p.y)) && !taskDone(S, "trash"), fn: (S) => watch(S, 30.4, 18.5, 8, "Something moved by the gate.") },
   ],
   "2night": [
     { at: 0.5, fn: () => { emit({ k: "card", title: "3:12 AM", lines: ["It's pitch black. The power's out.", "Someone is walking around the house."], t: 5 }); emit({ k: "powerout" }); } },
-    { at: 7, fn: say("There are planks in the hall closet. Board up the windows.", "#ffe082") },
+    { at: 10, fn: say("There are planks in the hall closet. Board up the windows.", "#ffe082") },
   ],
   "3evening": [
     { at: 0.3, fn: () => emit({ k: "card", title: "NIGHT 3 — WEDNESDAY", lines: ["Aunt May gets home in the morning. One more night.", "Uncle Ray left planks in the hall closet.", "He's already out there. Board up the windows. Lock the doors."], t: 8 }) },
-    { at: 20, fn: textMsg("tonight.") },
-    { at: 75, fn: (S) => { if (S.power) { S.power = false; emit({ k: "powerout" }); say("The power just went out. And it's not even midnight.", "#ff5252", true)(); } } },
-    { at: 110, fn: textMsg("i'm right outside your kitchen") },
+    { at: 45, fn: textMsg("tonight.") },
+    { at: 150, fn: (S) => { if (S.power) { S.power = false; emit({ k: "powerout" }); say("The power just went out. And it's not even midnight.", "#ff5252", true)(); } } },
+    { at: 210, fn: textMsg("i'm right outside your kitchen") },
   ],
   "3night": [
     { at: 0.5, fn: (S) => {
@@ -805,7 +825,10 @@ function nightProgress(S) {
   return clamp((S.mins - cfg.wake) / (NIGHT_END - cfg.wake), 0, 1);
 }
 
-function wanderDelay(S) { return Math.max(2, 9 - S.aggr * 1.6 - nightProgress(S) * 2 - (S.n - 1) * 0.5) + rand(0, 3); }
+function wanderDelay(S) {
+  const base = [20, 16, 11, 7][S.aggr] || 7;
+  return Math.max(3, base - nightProgress(S) * 3 - (S.n - 1) * 0.6) + rand(0, 5);
+}
 
 function wanderOutside(S) {
   const st = S.stalker;
@@ -1068,7 +1091,7 @@ function updateEvents(S, dt) {
   if (S.aggr <= 0 || S.stage === "sleep" || S.stage === "morning") return;
   S.nextEvent -= dt;
   if (S.nextEvent > 0) return;
-  S.nextEvent = rand(12, 26) - S.aggr * 2;
+  S.nextEvent = rand(32, 58) - S.aggr * 5;
   const alive = Object.values(S.players).filter((p) => !p.down);
   const who = alive.length ? pick(alive).id : null;
   const winE = ENTRIES.filter((E) => E.kind === "window");

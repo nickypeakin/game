@@ -844,6 +844,16 @@ function makeItem(kind, n) {
     case "bulb": { const s = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), new THREE.MeshBasicMaterial({ color: 0xfff6d8 })); s.position.y = 0.05; g.add(s); addCyl(g, 0.025, 0.025, 0.04, 0, -0.01, 0, M.steel, 8); break; }
     case "laundry": addBox(g, 0.32, 0.08, 0.26, 0, 0, 0, phong({ color: 0x7aa3d8 })); addBox(g, 0.3, 0.08, 0.24, 0, 0.08, 0, phong({ color: 0xe8e0d0 })); break;
     case "plank": for (let i = 0; i < (n || 1); i++) { const b = addBox(g, 0.12, 0.04, 1.0, 0.0, i * 0.045, -0.2, M.board); b.rotation.y = 0.2; } break;
+    case "handset": {
+      // the landline receiver, held up to your ear
+      addBox(g, 0.06, 0.05, 0.24, 0, 0, 0, M.red);
+      addBox(g, 0.08, 0.07, 0.07, 0, -0.03, -0.11, M.red);
+      addBox(g, 0.08, 0.07, 0.07, 0, -0.03, 0.11, M.red);
+      g.position.set(0.12, 0.16, -0.08);
+      g.rotation.set(0.2, 0.5, 1.35);
+      g.scale.setScalar(0.8);
+      break;
+    }
   }
   g.traverse((m) => { if (m.isMesh) { m.castShadow = false; } });
   return g;
@@ -1067,7 +1077,7 @@ function updateCharacters(S, me, G, t) {
   }
   for (const id in W3.players) if (!seen[id]) { W3.scene.remove(W3.players[id].group); delete W3.players[id]; }
   // what you're holding
-  setHeld(W3.held, W3, me.down || me.hidden ? null : me.carry, me.carryN);
+  setHeld(W3.held, W3, me.down || me.hidden ? null : G.call ? "handset" : me.carry, me.carryN);
   W3.held.position.y = -0.3 + (G.bob || 0) * 0.6;
 }
 const opts3d = { menu: false };
