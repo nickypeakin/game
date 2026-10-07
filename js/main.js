@@ -11,11 +11,11 @@ const G = {
   lobby: [],           // [{id,name,color}]
   S: null,             // current state (authoritative on host, snapshot on clients)
   inputs: {},          // host only: latest input per player
-  me: { x: 0, y: 0, a: 0, fl: true }, mySnap: -1,
+  me: { x: 0, y: 0, a: 0, pitch: 0, fl: true }, mySnap: -1,
   rpos: {}, stR: { x: 1.5, y: 1.5, a: 0 },
   stam: 100, msgs: [], phoneCard: null, banner: null, prompt: null,
   scare: 0, shakeX: 0, shakeY: 0, shake: 0, dread: 0, phantom: null,
-  stingerCD: 0, stepDist: 0, mouseT: -10, simTimer: null, sendT: 0,
+  stingerCD: 0, stepDist: 0, plock: false, simTimer: null, sendT: 0,
 };
 const NET = { peer: null, conns: {}, host: null };
 
@@ -177,6 +177,7 @@ function applySnapshot(s) {
 }
 
 function leaveToMenu(keepStatus) {
+  releaseLook();
   if (G.simTimer) { clearInterval(G.simTimer); G.simTimer = null; }
   G.phase = "menu"; G.S = null; G.role = null; G.lobby = [];
   const peer = NET.peer;
@@ -193,11 +194,11 @@ function hostEmit(e) {
 }
 setEmitter(hostEmit);
 
-function startNight() {
+function startNight(resumeS) {
   G.inputs = {};
-  G.S = newGame(G.lobby);
+  G.S = resumeS || newGame(G.lobby);
   broadcast({ t: "start" });
-  enterPlay();
+  enterPlay(!!resumeS);
   let last = performance.now(), tick = 0;
   if (G.simTimer) clearInterval(G.simTimer);
   G.simTimer = setInterval(() => {
@@ -211,20 +212,28 @@ function startNight() {
   }, 1000 / 30);
 }
 
-function enterPlay() {
+function enterPlay(resumed) {
   G.phase = "play";
   show(null);
   G.mySnap = -1; G.rpos = {}; G.msgs = []; G.phoneCard = null; G.scare = 0; G.stam = 100; G.me.fl = true;
-  G.stR = { x: 1.5, y: 1.5, a: 0 };
-  G.banner = { text: "12:00 AM", sub: "Board up the doors and windows. Survive until 6 AM.", t: 5 };
-  addMsg("Grab planks from the piles and board up the windows & doors!", "#ffe082");
-  addMsg("Shine your flashlight at him through a window to scare him off.", "#80deea");
+  G.stR = G.S ? { x: G.S.stalker.x, y: G.S.stalker.y, a: G.S.stalker.a } : { x: 1.5, y: 1.5, a: 0 };
+  if (resumed) {
+    addMsg("The game was updated. Your night continues.", "#b0bec5");
+  } else {
+    G.banner = { text: "12:00 AM", sub: "Board up the doors and windows. Survive until 6 AM.", t: 5 };
+    addMsg("Grab planks from the piles and board up the windows & doors!", "#ffe082");
+    addMsg("Shine your flashlight at him through a window to scare him off.", "#80deea");
+  }
   if (G.S && G.S.players[G.myId]) { const p = G.S.players[G.myId]; G.me.x = p.x; G.me.y = p.y; G.mySnap = p.snap; }
-  R.cv.focus();
+  G.me.pitch = 0; lookDX = lookDY = 0;
+  if (!resumed && G.S && G.S.players[G.myId]) G.me.a = G.S.players[G.myId].a;
+  R.gl.focus();
+  requestLook();
 }
 
 function showEnd(result) {
   G.phase = "end";
+  releaseLook();
   setTimeout(() => {
     if (G.phase !== "end") return;
     show("end");
@@ -252,24 +261,35 @@ function backToLobby() {
 
 // ------------------------------ events -------------------------------------
 function myPos() { return G.me; }
+// stereo pan for a sound at (x, y): -1 = on your left, +1 = on your right
+function panFor(x, y) {
+  const dx = x - G.me.x, dy = y - G.me.y, d = Math.hypot(dx, dy);
+  if (d < 0.3) return 0;
+  return clamp((-dx * Math.sin(G.me.a) + dy * Math.cos(G.me.a)) / d, -1, 1) * Math.min(1, d / 2);
+}
 function posPlay(name, x, y, base = 1) {
   const me = myPos();
   const d = Math.hypot(x - me.x, y - me.y);
-  SFX.play(name, base / (1 + d * 0.17), clamp((x - me.x) / 8, -1, 1));
+  SFX.play(name, base / (1 + d * 0.17), panFor(x, y));
   return d;
 }
 
 function onEvent(e) {
   if (e.to && e.to !== G.myId) return;
   switch (e.k) {
-    case "bang": { const d = posPlay("bang", e.x, e.y, 1.3); G.shake = Math.max(G.shake, 7 / (1 + d * 0.4)); break; }
+    case "bang": {
+      const d = posPlay("bang", e.x, e.y, 1.3);
+      G.shake = Math.max(G.shake, 7 / (1 + d * 0.4));
+      G.stBang = 0.4;
+      break;
+    }
     case "glass": case "doorbreak": { const d = posPlay(e.k, e.x, e.y, 1.5); G.shake = Math.max(G.shake, 12 / (1 + d * 0.3)); break; }
     case "wood": case "knock": case "scratch": case "tap": case "hammer": case "nail": case "plank": case "click": case "grab": case "hiss": case "doorbell":
       posPlay(e.k, e.x, e.y, e.k === "doorbell" || e.k === "knock" ? 1.2 : 1);
       if (e.k === "knock") addMsg("*knock knock knock*", "#bcaaa4");
       if (e.k === "doorbell") addMsg("Someone rang the doorbell. At this hour?", "#bcaaa4");
       break;
-    case "steps": SFX.play("steps", 0.5, clamp((e.x - G.me.x) / 10, -1, 1)); addMsg("Footsteps... from the apartment upstairs?", "#bcaaa4"); break;
+    case "steps": SFX.play("steps", 0.5, panFor(e.x, e.y)); addMsg("Footsteps... from the apartment upstairs?", "#bcaaa4"); break;
     case "msg": addMsg(e.text, e.c, e.big); break;
     case "text": SFX.play("buzz", 0.7); G.phoneCard = { from: "UNKNOWN NUMBER", text: e.text, t: 8 }; break;
     case "call": SFX.play("breath", 0.9); G.phoneCard = { from: "☎ CALLER (UNKNOWN)", text: '"' + e.text + '"', t: 8 }; break;
@@ -300,7 +320,8 @@ function onEvent(e) {
 
 // ------------------------------- input -------------------------------------
 const keys = {};
-let mouseX = 0, mouseY = 0, mouseDown = false;
+const LOOK_SENS = 0.0026;
+let mouseDown = false, dragging = false, lookDX = 0, lookDY = 0;
 addEventListener("keydown", (e) => {
   if (G.phase !== "play" && G.phase !== "end") return;
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
@@ -308,24 +329,57 @@ addEventListener("keydown", (e) => {
   keys[e.code] = true;
 });
 addEventListener("keyup", (e) => { keys[e.code] = false; });
-addEventListener("blur", () => { for (const k in keys) keys[k] = false; mouseDown = false; });
-addEventListener("mousemove", (e) => { mouseX = e.clientX; mouseY = e.clientY; G.mouseT = performance.now() / 1000; });
-addEventListener("mousedown", (e) => { if (G.phase === "play" && e.button === 0 && e.target === R.cv) mouseDown = true; });
-addEventListener("mouseup", () => { mouseDown = false; });
+addEventListener("blur", () => { for (const k in keys) keys[k] = false; mouseDown = false; dragging = false; });
+
+// Mouse look: pointer lock when the browser allows it, click-and-drag otherwise
+function requestLook() {
+  if (G.phase !== "play" || G.plock || !R.gl.requestPointerLock) return;
+  try {
+    const p = R.gl.requestPointerLock();
+    if (p && p.catch) p.catch(() => {});
+  } catch (e) {}
+}
+function releaseLook() {
+  try { if (document.pointerLockElement) document.exitPointerLock(); } catch (e) {}
+}
+document.addEventListener("pointerlockchange", () => { G.plock = document.pointerLockElement === R.gl; if (!G.plock) mouseDown = false; });
+addEventListener("mousemove", (e) => {
+  if (G.phase !== "play") return;
+  // some browsers report a huge jump on the first event after locking
+  const mx = e.movementX || 0, my = e.movementY || 0;
+  if (Math.abs(mx) > 250 || Math.abs(my) > 250) return;
+  if (G.plock || dragging) { lookDX += mx; lookDY += my; }
+});
+addEventListener("mousedown", (e) => {
+  if (G.phase !== "play" || e.button !== 0 || e.target !== R.gl) return;
+  if (G.plock) mouseDown = true;
+  else { dragging = true; requestLook(); }
+});
+addEventListener("mouseup", () => { mouseDown = false; dragging = false; });
 
 function myInput() {
-  return { t: "in", x: G.me.x, y: G.me.y, a: G.me.a, fl: G.me.fl, e: !!(keys.KeyE || keys.Space || mouseDown) };
+  return { t: "in", x: G.me.x, y: G.me.y, a: G.me.a, pt: G.me.pitch, fl: G.me.fl, e: !!(keys.KeyE || keys.Space || mouseDown) };
 }
 
 function updateLocal(dt, now) {
   const S = G.S, p = S && S.players[G.myId];
   if (!p || S.phase !== "play" || G.phase !== "play") return;
-  let mx = 0, my = 0;
-  if (keys.KeyD || keys.ArrowRight) mx += 1;
-  if (keys.KeyA || keys.ArrowLeft) mx -= 1;
-  if (keys.KeyS || keys.ArrowDown) my += 1;
-  if (keys.KeyW || keys.ArrowUp) my -= 1;
-  const moving = (mx || my) && !p.down && !p.hidden;
+  // looking around
+  G.me.a += lookDX * LOOK_SENS;
+  G.me.pitch = clamp((G.me.pitch || 0) - lookDY * LOOK_SENS, -1.3, 1.3);
+  lookDX = lookDY = 0;
+  if (keys.ArrowLeft) G.me.a -= dt * 2.4;
+  if (keys.ArrowRight) G.me.a += dt * 2.4;
+  G.me.a = Math.atan2(Math.sin(G.me.a), Math.cos(G.me.a));
+  // walking: forward/back along where you look, A/D strafe
+  let fw = 0, st = 0;
+  if (keys.KeyW || keys.ArrowUp) fw += 1;
+  if (keys.KeyS || keys.ArrowDown) fw -= 1;
+  if (keys.KeyD) st += 1;
+  if (keys.KeyA) st -= 1;
+  const ca = Math.cos(G.me.a), sa = Math.sin(G.me.a);
+  const mx = fw * ca - st * sa, my = fw * sa + st * ca;
+  const moving = (fw || st) && !p.down && !p.hidden;
   const sprint = moving && (keys.ShiftLeft || keys.ShiftRight) && G.stam > 1;
   if (sprint) G.stam = Math.max(0, G.stam - dt * 28);
   else G.stam = Math.min(100, G.stam + dt * (moving ? 10 : 18));
@@ -333,17 +387,12 @@ function updateLocal(dt, now) {
     const l = Math.hypot(mx, my), spd = (sprint ? SPRINT : WALK) * (p.planks > 0 ? 0.9 : 1);
     const ox = G.me.x, oy = G.me.y;
     moveCircle(G.me, mx / l * spd * dt, my / l * spd * dt, PR, playerSolid);
-    G.stepDist += Math.hypot(G.me.x - ox, G.me.y - oy);
+    const stepped = Math.hypot(G.me.x - ox, G.me.y - oy);
+    G.stepDist += stepped;
+    G.bobPhase = (G.bobPhase || 0) + stepped * 5.5;
     if (G.stepDist > (sprint ? 1.1 : 0.85)) { G.stepDist = 0; SFX.play("step", sprint ? 0.35 : 0.18, 0); }
   }
-  // aim: mouse if it moved recently, otherwise face where you walk
-  if (now - G.mouseT < 4) {
-    const [sx, sy] = toScreen(G.me.x, G.me.y);
-    G.me.a = Math.atan2(mouseY - sy, mouseX - sx);
-  } else if (moving) {
-    const ta = Math.atan2(my, mx);
-    G.me.a += angDiff(ta, G.me.a) * Math.min(1, dt * 12);
-  }
+  G.bob = Math.sin(G.bobPhase || 0) * (moving ? (sprint ? 0.05 : 0.03) : 0);
 }
 
 // ------------------------------ main loop ----------------------------------
@@ -360,11 +409,11 @@ function frame(nowMs) {
     tickEffects(dt, now);
     const S = G.S, sp = S.players[G.myId];
     if (sp && sp.snap !== G.mySnap) { G.me.x = sp.x; G.me.y = sp.y; G.mySnap = sp.snap; }
-    const me = Object.assign({}, sp || { id: G.myId, name: G.name, color: "#fff", bat: 0, planks: 0 }, { x: G.me.x, y: G.me.y, a: G.me.a, fl: G.me.fl });
+    const me = Object.assign({}, sp || { id: G.myId, name: G.name, color: "#fff", bat: 0, planks: 0 }, { x: G.me.x, y: G.me.y, a: G.me.a, pitch: G.me.pitch || 0, fl: G.me.fl });
     G.prompt = sp && !sp.down && !sp.hidden ? findTarget(S, me) : null;
-    renderFrame(S, me, G, now);
+    renderGame(S, me, G, now, dt);
   } else {
-    drawMenuBackdrop(now);
+    renderMenu(now, dt);
   }
   requestAnimationFrame(frame);
 }
@@ -388,7 +437,8 @@ function tickEffects(dt, now) {
   if (G.phantom && (G.phantom.t -= dt) <= 0) G.phantom = null;
   G.scare = Math.max(0, G.scare - dt);
   G.shake = Math.max(0, G.shake - dt * 25);
-  G.shakeX = (Math.random() - 0.5) * G.shake / TILE; G.shakeY = (Math.random() - 0.5) * G.shake / TILE;
+  G.shakeX = (Math.random() - 0.5) * G.shake * 0.006; G.shakeY = (Math.random() - 0.5) * G.shake * 0.006;
+  G.stBang = Math.max(0, (G.stBang || 0) - dt);
 
   // mood: heartbeat when he's close, stinger when you first spot him
   const d = Math.hypot(sr.x - G.me.x, sr.y - G.me.y);
@@ -400,33 +450,31 @@ function tickEffects(dt, now) {
   const tvD = Math.hypot(27.5 - G.me.x, 15.5 - G.me.y), phD = Math.hypot(16.5 - G.me.x, 15.5 - G.me.y);
   SFX.update(dt, {
     playing: G.phase === "play", power: S.power, dread: G.dread, heart: G.phase === "play" ? heart : 0,
-    tvVol: S.tv ? 0.25 / (1 + tvD * 0.3) : 0, tvPan: clamp((27.5 - G.me.x) / 8, -1, 1),
-    ringVol: S.phone > 0 ? 1 / (1 + phD * 0.15) : 0, ringPan: clamp((16.5 - G.me.x) / 8, -1, 1),
+    tvVol: S.tv ? 0.25 / (1 + tvD * 0.3) : 0, tvPan: panFor(28, 15.5),
+    ringVol: S.phone > 0 ? 1 / (1 + phD * 0.15) : 0, ringPan: panFor(16.5, 15.5),
   });
 }
 
-function drawMenuBackdrop(now) {
-  const g = R.ctx;
-  g.setTransform(1, 0, 0, 1, 0, 0);
-  g.fillStyle = "#050507"; g.fillRect(0, 0, R.W, R.H);
-  R.camX = 18 + Math.sin(now * 0.05) * 4; R.camY = 13 + Math.cos(now * 0.04) * 2;
-  worldXf(g);
-  g.globalAlpha = 0.25; g.drawImage(R.bg, 0, 0); g.globalAlpha = 1;
-  // a figure slowly circling the building
-  const a = now * 0.08, fx = 18 + Math.cos(a) * 16, fy = 12.8 + Math.sin(a) * 11;
-  drawStalker(g, fx, fy, a + Math.PI / 2, now, false);
-  g.setTransform(1, 0, 0, 1, 0, 0);
-  const vg = g.createRadialGradient(R.W / 2, R.H / 2, R.H * 0.1, R.W / 2, R.H / 2, R.H * 0.8);
-  vg.addColorStop(0, "rgba(0,0,0,0.3)"); vg.addColorStop(1, "rgba(0,0,0,0.95)");
-  g.fillStyle = vg; g.fillRect(0, 0, R.W, R.H);
-}
-
 // ------------------------------- boot --------------------------------------
-function boot() {
+// SOLO_ONLY is set by builds that run where peer-to-peer is unavailable
+// (e.g. the single-file page published on claude.ai).
+const SOLO_ONLY = !!window.SOLO_ONLY;
+
+function boot(saved) {
   initRender();
   try { $("name").value = localStorage.getItem("until6am-name") || ""; } catch (e) {}
-  const j = new URLSearchParams(location.search).get("join");
-  if (j) $("code").value = j.toUpperCase().slice(0, 4);
+  if (SOLO_ONLY) {
+    $("mpControls").classList.add("hidden");
+    if (window.MULTIPLAYER_URL) {
+      $("mpLink").href = $("mpLink").textContent = window.MULTIPLAYER_URL;
+      $("soloNote").classList.remove("hidden");
+    }
+  } else {
+    try {
+      const j = new URLSearchParams(location.search).get("join");
+      if (j) $("code").value = j.toUpperCase().slice(0, 4);
+    } catch (e) {}
+  }
   $("btnHost").onclick = () => hostGame(true);
   $("btnSolo").onclick = () => hostGame(false);
   $("btnJoin").onclick = joinGame;
@@ -439,9 +487,28 @@ function boot() {
   $("btnMenu").onclick = () => leaveToMenu();
   $("btnCopy").onclick = () => {
     const link = $("lobbyLink").textContent;
-    if (navigator.clipboard && link) navigator.clipboard.writeText(link).then(() => { $("btnCopy").textContent = "Copied!"; setTimeout(() => ($("btnCopy").textContent = "Copy invite link"), 1500); });
+    if (navigator.clipboard && link) navigator.clipboard.writeText(link).then(() => { $("btnCopy").textContent = "Copied!"; setTimeout(() => ($("btnCopy").textContent = "Copy invite link"), 1500); }).catch(() => {});
   };
   show("menu");
+  if (!R.ok) {
+    status(R.err || "Your browser couldn't start 3D graphics.", true);
+    for (const id of ["btnHost", "btnJoin", "btnSolo"]) $(id).disabled = true;
+  }
   requestAnimationFrame(frame);
+  // Pick a solo night back up after the page is hot-reloaded
+  if (saved && saved.S && saved.S.phase === "play") {
+    SFX.init();
+    G.role = "host"; G.myId = "host"; G.name = saved.name || "Player"; G.lobby = saved.lobby || [];
+    startNight(saved.S);
+    if (saved.me) Object.assign(G.me, saved.me);
+  }
 }
-boot();
+
+const HOT = window.claude && window.claude.hot;
+if (HOT && HOT.snapshot) {
+  HOT.snapshot(() => (G.role === "host" && !NET.peer && G.S && G.phase === "play")
+    ? { S: G.S, lobby: G.lobby, name: G.name, me: { x: G.me.x, y: G.me.y, a: G.me.a, fl: G.me.fl } }
+    : {});
+}
+if (HOT && HOT.ready) HOT.ready(boot);
+else boot(HOT && HOT.data);

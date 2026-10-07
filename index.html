@@ -8,18 +8,22 @@
 </head>
 <body>
   <canvas id="c" tabindex="0"></canvas>
+  <canvas id="hud"></canvas>
 
   <div id="menu" class="screen">
     <div class="panel">
       <h1>UNTIL <span>6</span> AM</h1>
       <p class="sub">Apartment 4B. 11:58 PM.<br>There's someone standing outside. He's been there for an hour.</p>
       <label class="field">Your name <input id="name" maxlength="12" placeholder="Player" autocomplete="off"></label>
-      <button id="btnHost">Host a Game</button>
-      <div class="row">
-        <input id="code" maxlength="4" placeholder="CODE" autocomplete="off">
-        <button id="btnJoin">Join</button>
+      <div id="mpControls">
+        <button id="btnHost">Host a Game</button>
+        <div class="row">
+          <input id="code" maxlength="4" placeholder="CODE" autocomplete="off">
+          <button id="btnJoin">Join</button>
+        </div>
       </div>
       <button id="btnSolo" class="alt">Play Solo</button>
+      <p id="soloNote" class="small hidden">This version is solo only. To play with friends, open the full game:<br><a id="mpLink" target="_blank" rel="noopener"></a></p>
       <button id="btnHelp" class="ghost">How to Play</button>
       <p id="status"></p>
     </div>
@@ -65,17 +69,19 @@
         <li><b>Batteries</b> are in the kitchen drawer.</li>
       </ul>
       <h2>Controls</h2>
-      <p class="small"><b>WASD / Arrows</b> move &nbsp;·&nbsp; <b>Mouse</b> aim flashlight &nbsp;·&nbsp; <b>Shift</b> sprint &nbsp;·&nbsp; <b>E / Space / Click</b> (hold) interact &nbsp;·&nbsp; <b>F</b> flashlight on/off</p>
+      <p class="small"><b>WASD</b> move &nbsp;·&nbsp; <b>Mouse</b> look around (click the game first; Esc frees the mouse) &nbsp;·&nbsp; <b>Arrow keys</b> walk and turn &nbsp;·&nbsp; <b>Shift</b> sprint &nbsp;·&nbsp; <b>E / Space / Click</b> (hold) interact &nbsp;·&nbsp; <b>F</b> flashlight on/off</p>
       <p class="small">Play with headphones. Talk to your friends (in person or on a call). Splitting up is usually a good idea... usually.</p>
       <button id="btnHelpBack">Got it</button>
     </div>
   </div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script src="js/map.js"></script>
   <script src="js/audio.js"></script>
   <script src="js/sim.js"></script>
-  <script src="js/render.js"></script>
+  <script src="js/world3d.js"></script>
+  <script src="js/hud.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>

@@ -184,7 +184,7 @@ function publicState(S) {
   const players = {};
   for (const p of Object.values(S.players)) {
     players[p.id] = {
-      id: p.id, name: p.name, color: p.color, x: +p.x.toFixed(2), y: +p.y.toFixed(2), a: +p.a.toFixed(2),
+      id: p.id, name: p.name, color: p.color, x: +p.x.toFixed(2), y: +p.y.toFixed(2), a: +p.a.toFixed(2), pt: +(p.pt || 0).toFixed(2),
       fl: p.fl, bat: Math.round(p.bat), planks: p.planks, down: p.down, hidden: p.hidden, hideX: p.hideX, hideY: p.hideY,
       snap: p.snap, act: p.act ? { label: p.act.label, t: p.act.t, dur: p.act.dur } : null,
     };
@@ -226,6 +226,7 @@ function updatePlayers(S, inputs, dt) {
         else if (d > 0.001) p.snap++;
       }
       if (typeof inp.a === "number") p.a = inp.a;
+      if (typeof inp.pt === "number") p.pt = clamp(inp.pt, -1.4, 1.4);
       p.fl = !!inp.fl;
     }
     if (flashOn(p)) p.bat = Math.max(0, p.bat - dt * 0.55);

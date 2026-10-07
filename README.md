@@ -1,7 +1,7 @@
 # Until 6 AM
 
-A co-op horror game for the browser (made for Chromebooks). You and up to 5 friends
-are stuck in an apartment at night. Someone is outside. He pounds on the doors and
+A first-person 3D co-op horror game for the browser (made for Chromebooks). You and
+up to 5 friends are stuck in an apartment at night. Someone is outside. He pounds on the doors and
 windows, cuts the power, calls the landline, and texts you from an unknown number.
 Board everything up and survive until **6:00 AM**.
 
@@ -23,8 +23,9 @@ save. After a minute the game is live at `https://<your-username>.github.io/<rep
 
 | Key | Action |
 | --- | --- |
-| WASD / Arrow keys | Move |
-| Mouse / trackpad | Aim flashlight |
+| WASD | Move |
+| Mouse / trackpad | Look around (click the game first; Esc frees the mouse) |
+| Arrow keys | Walk forward/back and turn |
 | Shift | Sprint |
 | E / Space / Click (hold) | Interact: grab planks, board up, hide, fix power, answer phone, help a friend up |
 | F | Flashlight on/off |
@@ -54,12 +55,17 @@ save. After a minute the game is live at `https://<your-username>.github.io/<rep
 - Some school networks block peer-to-peer connections. If joining never connects, try
   a different network (like a phone hotspot) or play Solo.
 - Play with headphones. All sounds are generated in the browser.
+- The 3D graphics use [Three.js](https://threejs.org/) (loaded from cdnjs). If the game
+  runs slowly, it automatically lowers the resolution.
 
 ## Files
 
 - `index.html`, `style.css`: page and menus
 - `js/map.js`: the apartment layout
 - `js/sim.js`: game rules, the stalker's behavior and random events (runs on the host)
-- `js/render.js`: graphics, lighting and HUD
+- `js/world3d.js`: the 3D apartment, lighting, flashlights and characters
+- `js/hud.js`: the on-screen clock, minimap, prompts and messages
 - `js/audio.js`: sound effects
 - `js/main.js`: menus, input, networking and the main loop
+- `tools/build-single-file.js`: bundles everything into one HTML file (used for the
+  solo version on claude.ai)
