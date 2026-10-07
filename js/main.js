@@ -13,7 +13,7 @@ const G = {
   inputs: {},          // host only: latest input per player
   me: { x: 0, y: 0, a: 0, pitch: 0, fl: true }, mySnap: -1,
   rpos: {}, stR: { x: 1.5, y: 1.5, a: 0 },
-  stam: 100, msgs: [], phoneCard: null, banner: null, prompt: null,
+  stam: 100, msgs: [], notes: [], call: null, banner: null, prompt: null,
   scare: 0, shakeX: 0, shakeY: 0, shake: 0, dread: 0, phantom: null,
   stingerCD: 0, stepDist: 0, plock: false, simTimer: null, sendT: 0,
 };
@@ -47,8 +47,8 @@ function renderLobby() {
 }
 
 function addMsg(text, c, big) {
-  G.msgs.push({ text, c, big, t: 8 });
-  if (G.msgs.length > 6) G.msgs.shift();
+  G.msgs.push({ text, c, big, t: 7 });
+  if (G.msgs.length > 4) G.msgs.shift();
 }
 
 // ----------------------------- networking ----------------------------------
@@ -215,7 +215,7 @@ function startNight(resumeS, night) {
 function enterPlay(resumed) {
   G.phase = "play";
   show(null);
-  G.mySnap = -1; G.rpos = {}; G.msgs = []; G.phoneCard = null; G.card = null; G.scare = 0; G.stam = 100;
+  G.mySnap = -1; G.rpos = {}; G.msgs = []; G.notes = []; G.call = null; G.card = null; G.scare = 0; G.stam = 100;
   G.stR = G.S ? { x: G.S.stalker.x, y: G.S.stalker.y, a: G.S.stalker.a } : { x: -30, y: -30, a: 0 };
   G.lastStage = null;
   if (resumed) addMsg("The game was updated. Your night continues.", "#b0bec5");
@@ -289,8 +289,12 @@ function onEvent(e) {
       break;
     case "steps": SFX.play("steps", 0.5, panFor(e.x, e.y)); addMsg("Footsteps... from the apartment upstairs?", "#bcaaa4"); break;
     case "msg": addMsg(e.text, e.c, e.big); break;
-    case "text": SFX.play("buzz", 0.7); G.phoneCard = { from: "UNKNOWN NUMBER", text: e.text, t: 8 }; break;
-    case "call": SFX.play("breath", 0.9); G.phoneCard = { from: "☎ CALLER (UNKNOWN)", text: '"' + e.text + '"', t: 8 }; break;
+    case "text": SFX.play("buzz", 0.7); G.notes.push({ from: "Unknown", text: e.text, t: 0 }); break;
+    case "call":
+      G.call = { text: e.text, t: 0, dur: 4 + e.text.length * 0.07 };
+      SFX.play("pickup", 0.9); SFX.play("breath", 0.8, 0, 0.4); SFX.play("voice", 0.7, 0, 1.4);
+      SFX.play("hangup", 0.8, 0, G.call.dur - 0.6);
+      break;
     case "whisper": SFX.play("whisper", 0.7, rand(-1, 1)); addMsg("...did someone just whisper your name?", "#ce93d8"); break;
     case "phantom": {
       const a = G.me.a + rand(-0.5, 0.5), d = rand(3.5, 6);
@@ -329,10 +333,17 @@ function onEvent(e) {
 const keys = {};
 const LOOK_SENS = 0.0026;
 let mouseDown = false, dragging = false, dragDist = 0, lookDX = 0, lookDY = 0;
+// a tap is counted, not held: the host acts when the count changes
+G.pressE = 0; G.pressQ = 0; G.pressG = 0;
 addEventListener("keydown", (e) => {
   if (G.phase !== "play" && G.phase !== "end") return;
   if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
-  if (e.code === "KeyF" && !e.repeat) { G.me.fl = !G.me.fl; SFX.play("click", 0.4); }
+  if (!e.repeat) {
+    if (e.code === "KeyF") { G.me.fl = !G.me.fl; SFX.play("click", 0.4); }
+    if (e.code === "KeyE" || e.code === "Space") G.pressE++;
+    if (e.code === "KeyQ") G.pressQ++;
+    if (e.code === "KeyG") G.pressG++;
+  }
   keys[e.code] = true;
 });
 addEventListener("keyup", (e) => { keys[e.code] = false; });
@@ -368,13 +379,17 @@ addEventListener("mousemove", (e) => {
 });
 addEventListener("mousedown", (e) => {
   if (G.phase !== "play" || e.button !== 0 || e.target !== R.gl) return;
-  mouseDown = true;
-  if (!G.plock) { dragging = true; dragDist = 0; requestLook(); }
+  if (G.plock) G.pressE++;
+  else { mouseDown = true; dragging = true; dragDist = 0; requestLook(); }
 });
-addEventListener("mouseup", () => { mouseDown = false; dragging = false; });
+addEventListener("mouseup", () => {
+  // without pointer lock, a click that didn't turn into a drag counts as a tap
+  if (mouseDown && G.phase === "play" && !G.plock) G.pressE++;
+  mouseDown = false; dragging = false;
+});
 
 function myInput() {
-  return { t: "in", x: G.me.x, y: G.me.y, a: G.me.a, pt: G.me.pitch, fl: G.me.fl, e: !!(keys.KeyE || keys.Space || mouseDown), q: !!keys.KeyQ, g: !!keys.KeyG };
+  return { t: "in", x: G.me.x, y: G.me.y, a: G.me.a, pt: G.me.pitch, fl: G.me.fl, ep: G.pressE, qp: G.pressQ, gp: G.pressG };
 }
 
 function updateLocal(dt, now) {
@@ -449,7 +464,8 @@ function tickEffects(dt, now) {
 
   for (const m of G.msgs) m.t -= dt;
   G.msgs = G.msgs.filter((m) => m.t > 0);
-  if (G.phoneCard && (G.phoneCard.t -= dt) <= 0) G.phoneCard = null;
+  if (G.notes.length) { G.notes[0].t += dt; if (G.notes[0].t > 6) G.notes.shift(); }
+  if (G.call && (G.call.t += dt) > G.call.dur) G.call = null;
   if (G.card && (G.card.t -= dt) <= 0) G.card = null;
   // flashlight off for the cosy evening, on when something wakes you
   if (S.stage !== G.lastStage) {

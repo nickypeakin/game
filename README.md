@@ -31,7 +31,7 @@ save. After a minute the game is live at `https://<your-username>.github.io/<rep
 | Mouse / trackpad | Look around (click the game first; Esc frees the mouse) |
 | Arrow keys | Walk forward/back and turn |
 | Shift | Sprint |
-| E / Space / Click (hold) | Use things: doors, light switches, fridge, microwave, sink, trash, beds, closets, fuse box... |
+| E / Space / Click (tap) | Use things: doors, light switches, fridge, microwave, sink, trash, beds, closets, fuse box... |
 | Q | Lock / unlock the outside doors (and other second actions) |
 | G | Put back whatever you're carrying |
 | F | Flashlight on/off |

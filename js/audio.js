@@ -174,6 +174,32 @@ const SFX = (() => {
     screw(d, t) { for (let i = 0; i < 5; i++) noise(d, t + i * 0.3, 0.12, { type: "bandpass", freq: 3500, q: 4, gain: 0.4 }); tone(d, t + 1.6, 120, 0.3, { gain: 0.15 }); },
     switch(d, t) { noise(d, t, 0.025, { type: "highpass", freq: 3000, gain: 0.9 }); tone(d, t, 1800, 0.02, { type: "square", gain: 0.06 }); },
     tick(d, t) { tone(d, t, 880, 0.18, { type: "triangle", gain: 0.18 }); tone(d, t + 0.09, 1320, 0.25, { type: "triangle", gain: 0.14 }); },
+    pickup(d, t) { noise(d, t, 0.06, { freq: 900, gain: 1 }); tone(d, t, 160, 0.08, { gain: 0.4 }); noise(d, t + 0.1, 0.25, { type: "bandpass", freq: 600, q: 1, gain: 0.15, a: 0.05 }); },
+    hangup(d, t) {
+      noise(d, t, 0.05, { freq: 1200, gain: 1 }); tone(d, t, 140, 0.08, { gain: 0.5 });
+      tone(d, t + 0.4, 350, 1.6, { gain: 0.06, a: 0.02 }); tone(d, t + 0.4, 440, 1.6, { gain: 0.06, a: 0.02 });
+    },
+    voice(d, t) {
+      // a low murmur through a phone line: a buzzing "throat" shaped by moving vowel formants
+      const dur = 3.6;
+      const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.Q.value = 1.2; bp.frequency.value = 900;
+      const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 300;
+      const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 3000;
+      bp.connect(hp); hp.connect(lp); lp.connect(d);
+      const osc = ctx.createOscillator(); osc.type = "sawtooth";
+      const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t);
+      osc.frequency.setValueAtTime(92, t);
+      for (let i = 0; i < 9; i++) {
+        const tt = t + i * 0.4;
+        osc.frequency.linearRampToValueAtTime(80 + Math.random() * 25, tt + 0.2);
+        bp.frequency.linearRampToValueAtTime(500 + Math.random() * 1300, tt + 0.15);
+        g.gain.linearRampToValueAtTime(Math.random() < 0.2 ? 0.02 : 0.35, tt + 0.08);
+        g.gain.linearRampToValueAtTime(0.06, tt + 0.36);
+      }
+      g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      osc.connect(g); g.connect(bp); osc.start(t); osc.stop(t + dur + 0.1);
+      noise(d, t, dur, { type: "bandpass", freq: 2500, q: 0.7, gain: 0.08, a: 0.2 });
+    },
     sleep(d, t) { for (const [f, o] of [[392, 0], [330, 0.5], [262, 1.0]]) tone(d, t + o, f, 1.4, { gain: 0.12, a: 0.1 }); },
   };
 
@@ -212,12 +238,16 @@ const SFX = (() => {
 
     tv = loopNoise("bandpass", 3000, 0.5);
 
-    // telephone ring: 440+480Hz, amplitude-modulated at 20Hz
+    // an old landline's bell: two metal bells struck by a clapper 20 times a second
     const am = ctx.createGain(); am.gain.value = 0.5;
     const gate = ctx.createGain(); gate.gain.value = 0;
     const rp = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
-    for (const f of [440, 480]) { const o = ctx.createOscillator(); o.frequency.value = f; o.connect(am); o.start(); }
-    const rl = ctx.createOscillator(); rl.type = "square"; rl.frequency.value = 20;
+    for (const [f, v] of [[1180, 0.5], [1590, 0.4], [2360, 0.18], [3170, 0.1]]) {
+      const o = ctx.createOscillator(); o.frequency.value = f;
+      const og = ctx.createGain(); og.gain.value = v;
+      o.connect(og); og.connect(am); o.start();
+    }
+    const rl = ctx.createOscillator(); rl.type = "sawtooth"; rl.frequency.value = 20;
     const rlg = ctx.createGain(); rlg.gain.value = 0.5;
     rl.connect(rlg); rlg.connect(am.gain); rl.start();
     am.connect(gate);
@@ -237,8 +267,8 @@ const SFX = (() => {
     if (tv.p) set(tv.p.pan, m.tvPan || 0);
     if (m.ringVol > 0) {
       ring.phase += dt;
-      const on = (ring.phase % 3.2) < 1.4;
-      set(ring.g.gain, on ? m.ringVol * 0.12 : 0);
+      const on = (ring.phase % 6) < 2; // ring for two seconds, quiet for four
+      set(ring.g.gain, on ? m.ringVol * 0.16 : 0);
       if (ring.p) set(ring.p.pan, m.ringPan || 0);
     } else { ring.phase = 0; set(ring.g.gain, 0); }
     if (m.heart > 0.05) {
