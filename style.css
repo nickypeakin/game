@@ -45,6 +45,8 @@ button.ghost:hover { border-color: #666; color: #fff; }
 
 .row { display: flex; gap: 8px; margin: 8px 0; }
 .joinHint { margin: 12px 0 0; text-align: left; }
+.bad { color: #ff8a80; }
+#lobbyNote:empty { display: none; }
 .row input { flex: 1; }
 .row button { width: auto; margin: 0; padding: 0 22px; }
 
