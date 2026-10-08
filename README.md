@@ -62,6 +62,11 @@ save. After a minute the game is live at `https://<your-username>.github.io/<rep
 - Some school networks block peer-to-peer connections. When joining fails, the menu says
   which step failed: reaching the game server, finding the room, or connecting to the
   host's computer. Try a different network (like a phone hotspot) or play Solo.
+- **Relay for strict networks:** if friends find the room but can't connect, the network
+  is blocking direct connections. A free TURN relay on port 443 fixes that: make a free
+  account at [metered.ca](https://www.metered.ca/), open *TURN Server*, and put the app name
+  (the part before `.metered.live`) and the API key into `TURN_RELAY` at the top of
+  `js/main.js`.
 - Play with headphones. All sounds are generated in the browser.
 - The 3D graphics use [Three.js](https://threejs.org/). Three.js and PeerJS are copied into
   `lib/` so the game doesn't depend on outside code sites (school filters often block
