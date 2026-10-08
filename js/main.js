@@ -59,8 +59,19 @@ function genCode() {
   return s;
 }
 
-function hostGame(online) {
+// a room code typed in the box, or "" if there isn't a valid one
+function typedCode() { return $("code").value.toUpperCase().replace(/[^A-Z]/g, ""); }
+function dropPeer() {
+  const peer = NET.peer;
+  NET.peer = null; NET.conns = {}; NET.host = null;
+  try { if (peer) peer.destroy(); } catch (e) {}
+}
+
+function hostGame(online, retry) {
+  // typed a friend's code but pressed Host? They meant to join.
+  if (online && !retry && typedCode().length === 4) { joinGame(); return; }
   readName(); SFX.init();
+  dropPeer();
   G.role = "host"; G.myId = "host"; G.code = "";
   G.lobby = [{ id: "host", name: G.name, color: COLORS[0] }];
   if (!online) { G.phase = "lobby"; startNight(); return; }
@@ -70,6 +81,7 @@ function hostGame(online) {
   const peer = new Peer(PEER_PREFIX + code, { debug: 0 });
   NET.peer = peer;
   peer.on("open", () => {
+    if (NET.peer !== peer) return;
     G.code = code; G.phase = "lobby"; status("");
     renderLobby(); show("lobby");
   });
@@ -79,11 +91,12 @@ function hostGame(online) {
     conn.on("error", () => hostDrop(conn.peer));
   });
   peer.on("error", (err) => {
-    if (err.type === "unavailable-id") { peer.destroy(); hostGame(true); return; }
-    if (G.phase === "menu") status("Network error: " + err.type + ". Try again or play Solo.", true);
+    if (NET.peer !== peer) return;
+    if (err.type === "unavailable-id") { hostGame(true, true); return; }
+    if (G.phase === "menu") status(netErrorText(err) + " Try again or play Solo.", true);
     else addMsg("Network hiccup: " + err.type, "#ff8a80");
   });
-  peer.on("disconnected", () => { try { peer.reconnect(); } catch (e) {} });
+  peer.on("disconnected", () => { if (NET.peer === peer && !peer.destroyed) { try { peer.reconnect(); } catch (e) {} } });
 }
 
 function hostOnData(conn, m) {
@@ -123,28 +136,40 @@ function broadcastLobby(back) {
   if (G.phase === "lobby") renderLobby();
 }
 
+function netErrorText(err) {
+  const t = err && err.type;
+  if (t === "network" || t === "server-error" || t === "socket-error" || t === "socket-closed") return "Couldn't reach the game server (this network may block it).";
+  if (t === "browser-incompatible") return "This browser can't do online play.";
+  return "Network error: " + t + ".";
+}
+
 function joinGame() {
   readName(); SFX.init();
-  const code = $("code").value.toUpperCase().replace(/[^A-Z]/g, "");
-  if (code.length !== 4) { status("Enter the 4-letter room code from your friend.", true); return; }
+  const code = typedCode();
+  if (code.length !== 4) { status("Type the 4-letter code from your friend's lobby screen, then press Join.", true); return; }
   if (typeof Peer === "undefined") { status("Couldn't load the multiplayer library (no internet?).", true); return; }
+  dropPeer();
   status("Connecting to room " + code + "...");
   const peer = new Peer({ debug: 0 });
   NET.peer = peer;
-  const timeout = setTimeout(() => { if (G.phase === "menu") status("Couldn't reach that room. Check the code and that the host is still in the lobby.", true); }, 15000);
+  const timeout = setTimeout(() => {
+    if (NET.peer === peer && G.phase === "menu") status("Couldn't connect to room " + code + ". Check the code, and that your friend is still on the lobby screen. If it keeps failing, this network may be blocking online play.", true);
+  }, 15000);
   peer.on("open", () => {
+    if (NET.peer !== peer) return;
     const conn = peer.connect(PEER_PREFIX + code, { reliable: true, serialization: "json" });
     NET.host = conn;
     conn.on("open", () => conn.send({ t: "hello", name: G.name }));
     conn.on("data", (m) => { clearTimeout(timeout); clientOnData(m); });
     conn.on("close", () => {
-      if (G.phase !== "menu") { leaveToMenu(); status("The host left the game.", true); }
+      if (NET.peer === peer && G.phase !== "menu") { leaveToMenu(); status("The host left the game.", true); }
     });
   });
   peer.on("error", (err) => {
+    if (NET.peer !== peer) return;
     clearTimeout(timeout);
-    if (err.type === "peer-unavailable") status("No game found with code " + code + ".", true);
-    else status("Network error: " + err.type, true);
+    if (err.type === "peer-unavailable") status("No game found with code " + code + ". Check the code with your friend: they press Host a Game and read you the code on their screen.", true);
+    else status(netErrorText(err), true);
   });
 }
 
@@ -180,9 +205,7 @@ function leaveToMenu(keepStatus) {
   releaseLook();
   if (G.simTimer) { clearInterval(G.simTimer); G.simTimer = null; }
   G.phase = "menu"; G.S = null; G.role = null; G.lobby = [];
-  const peer = NET.peer;
-  NET.peer = null; NET.conns = {}; NET.host = null;
-  try { if (peer) peer.destroy(); } catch (e) {}
+  dropPeer();
   show("menu");
   if (!keepStatus) status("");
 }

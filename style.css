@@ -44,6 +44,7 @@ button.ghost { background: transparent; border-color: #333; color: #aaa; font-we
 button.ghost:hover { border-color: #666; color: #fff; }
 
 .row { display: flex; gap: 8px; margin: 8px 0; }
+.joinHint { margin: 12px 0 0; text-align: left; }
 .row input { flex: 1; }
 .row button { width: auto; margin: 0; padding: 0 22px; }
 
