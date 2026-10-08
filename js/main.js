@@ -2,37 +2,29 @@
 // Menus, input, networking (PeerJS / WebRTC) and the main loop.
 // ---------------------------------------------------------------------------
 const PEER_PREFIX = "until6am-room-";
-// STUN finds a direct route between two computers; TURN relays the game when
-// a network blocks direct connections (the TCP entries help on strict school Wi-Fi).
+// STUN finds a direct route between two computers. When a network (like school
+// Wi-Fi) blocks that, TURN relays the game through Metered's servers on ports
+// 80 and 443, which those networks allow. (The owner chose to publish this free
+// relay login; it only lets someone use the relay's monthly allowance.)
 const PEER_OPTS = {
   debug: 0,
   config: {
     iceServers: [
       { urls: "stun:stun.l.google.com:19302" },
       {
-        urls: ["turn:eu-0.turn.peerjs.com:3478", "turn:us-0.turn.peerjs.com:3478", "turn:eu-0.turn.peerjs.com:3478?transport=tcp", "turn:us-0.turn.peerjs.com:3478?transport=tcp"],
-        username: "peerjs", credential: "peerjsp",
+        urls: [
+          "turn:global.relay.metered.ca:80",
+          "turn:global.relay.metered.ca:80?transport=tcp",
+          "turn:global.relay.metered.ca:443",
+          "turns:global.relay.metered.ca:443?transport=tcp",
+        ],
+        username: "b641e4a81d64a4bb3e30cf16",
+        credential: "IOQ5i769BlHy5Zla",
       },
     ],
     sdpSemantics: "unified-plan",
   },
 };
-// Optional TURN relay on port 443, for networks that block direct connections
-// between computers (school Wi-Fi). Free account at metered.ca → TURN Server:
-// put the app name (the part before .metered.live) and the API key here.
-const TURN_RELAY = { app: "", apiKey: "" };
-let relayServers = [];
-function loadRelay() {
-  if (!TURN_RELAY.app || !TURN_RELAY.apiKey || typeof fetch !== "function") return;
-  fetch("https://" + TURN_RELAY.app + ".metered.live/api/v1/turn/credentials?apiKey=" + encodeURIComponent(TURN_RELAY.apiKey))
-    .then((r) => (r.ok ? r.json() : []))
-    .then((list) => { if (Array.isArray(list)) relayServers = list.filter((x) => x && x.urls); })
-    .catch(() => {});
-}
-function peerOpts() {
-  if (!relayServers.length) return PEER_OPTS;
-  return Object.assign({}, PEER_OPTS, { config: Object.assign({}, PEER_OPTS.config, { iceServers: PEER_OPTS.config.iceServers.concat(relayServers) }) });
-}
 const BLOCKED_TIP = "School and some home Wi-Fi block online games. Try a phone hotspot or another Wi-Fi, or play Solo.";
 const $ = (id) => document.getElementById(id);
 
@@ -110,7 +102,7 @@ function hostGame(online, retry) {
   if (typeof Peer === "undefined") { status("Couldn't load the multiplayer library. Reload the page, or play Solo.", true); return; }
   status("Connecting to the game server...");
   const code = genCode();
-  const peer = new Peer(PEER_PREFIX + code, peerOpts());
+  const peer = new Peer(PEER_PREFIX + code, PEER_OPTS);
   NET.peer = peer;
   const openT = setTimeout(() => {
     if (NET.peer === peer && G.phase === "menu") status("Couldn't reach the game server. " + BLOCKED_TIP, true);
@@ -201,7 +193,7 @@ function joinGame() {
   if (typeof Peer === "undefined") { status("Couldn't load the multiplayer library. Reload the page, or play Solo.", true); return; }
   dropPeer();
   status("Connecting to the game server...");
-  const peer = new Peer(peerOpts());
+  const peer = new Peer(PEER_OPTS);
   NET.peer = peer;
   let step = "server";
   const fail = () => {
@@ -595,7 +587,6 @@ function boot(saved) {
       $("soloNote").classList.remove("hidden");
     }
   } else {
-    loadRelay();
     try {
       const j = new URLSearchParams(location.search).get("join");
       if (j) $("code").value = j.toUpperCase().slice(0, 4);
