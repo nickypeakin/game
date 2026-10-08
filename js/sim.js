@@ -6,6 +6,8 @@ const PR = 0.3;                    // player radius (m)
 const WALK = 2.8, SPRINT = 4.4;
 const FL_RANGE = 9, FL_HALF = 0.42;
 const MAX_BOARDS = 3, MAX_PLANKS = 2;
+const BED_HIDE_MAX = 30;           // seconds you can stay under a bed before you crawl out
+const BED_COOLDOWN = 45;           // then this long before you can hide under a bed again
 const NIGHT_END = 600;             // 6:00 AM, in minutes after 8:00 PM
 const LAST_NIGHT = 3;
 const COLORS = ["#4fc3f7", "#ffb74d", "#81c784", "#f06292", "#ba68c8", "#fff176"];
@@ -309,13 +311,13 @@ function tileSpot(S, p, c, tx, ty) {
       return { e: doAct("h" + k, "hide", "Hide in the closet", 0.35, k) };
     }
     case "b": {
+      const hide = p.bedCD > 0
+        ? noteAct("h" + k, "Too soon to hide under the bed again (" + Math.ceil(p.bedCD) + "s)")
+        : doAct("h" + k, "hide", "Hide under the bed", 0.35, k);
       if (S.stage === "evening" && hasTask(S, "bed")) {
-        return {
-          e: choresDone(S) ? doAct("bed", "sleep", "Go to sleep", 1.5) : noteAct("bed", "Finish your chores before bed"),
-          q: doAct("h" + k, "hide", "Hide under the bed", 0.35, k),
-        };
+        return { e: choresDone(S) ? doAct("bed", "sleep", "Go to sleep", 1.5) : noteAct("bed", "Finish your chores before bed"), q: hide };
       }
-      return { e: doAct("h" + k, "hide", "Hide under the bed", 0.35, k) };
+      return { e: hide };
     }
     case "v":
       return { e: doAct("tv", "tv", S.tv ? "Turn off the TV" : "Turn on the TV", 0.3) };
@@ -348,7 +350,7 @@ function newGame(lobby, night) {
   lobby.forEach((L, i) => {
     S.players[L.id] = {
       id: L.id, name: L.name, color: L.color, x: 0, y: 0, a: 0, pt: 0, fl: true, bat: 100, carry: null, carryN: 0,
-      down: false, hidden: false, hideX: 0, hideY: 0, snap: 0, act: null, seenHide: false, hamT: 0, press: {},
+      down: false, hidden: false, hideX: 0, hideY: 0, hideT: 0, bedCD: 0, snap: 0, act: null, seenHide: false, hamT: 0, press: {},
     };
   });
   setupEvening(S);
@@ -359,7 +361,7 @@ function placePlayers(S, spots, a) {
   Object.values(S.players).forEach((p, i) => {
     const s = spots[i % spots.length];
     p.x = s[0]; p.y = s[1]; p.a = a; p.snap++;
-    p.down = false; p.hidden = false; p.act = null; p.carry = null; p.carryN = 0;
+    p.down = false; p.hidden = false; p.act = null; p.carry = null; p.carryN = 0; p.hideT = 0; p.bedCD = 0;
   });
 }
 
@@ -435,6 +437,7 @@ function publicState(S) {
     players[p.id] = {
       id: p.id, name: p.name, color: p.color, x: +p.x.toFixed(2), y: +p.y.toFixed(2), a: +p.a.toFixed(2), pt: +(p.pt || 0).toFixed(2),
       fl: p.fl, bat: Math.round(p.bat), carry: p.carry, carryN: p.carryN, down: p.down, hidden: p.hidden, hideX: p.hideX, hideY: p.hideY,
+      hideT: p.hidden ? +p.hideT.toFixed(1) : 0, bedCD: Math.ceil(p.bedCD || 0),
       snap: p.snap, act: p.act ? { label: p.act.label, t: p.act.t, dur: p.act.dur } : null,
     };
   }
@@ -526,13 +529,19 @@ function updatePlayers(S, inputs, dt) {
     const pe = pressed("ep"), pq = pressed("qp"), pg = pressed("gp");
     if (pg && p.carry && !p.down) dropItem(S, p);
     if (flashOn(p)) p.bat = Math.max(0, p.bat - dt * 0.45);
+    if (p.bedCD > 0) p.bedCD = Math.max(0, p.bedCD - dt);
     if (p.down) { p.act = null; continue; }
-    if (pe || pq) {
-      if (p.hidden) {
-        p.hidden = false; p.seenHide = false; p.act = null;
-        emit({ k: "creak", x: p.hideX, y: p.hideY, soft: true });
+    if (p.hidden) {
+      p.hideT += dt;
+      // no camping under the bed all night
+      if (underBed(p) && p.hideT >= BED_HIDE_MAX) {
+        leaveHiding(p);
+        emit({ k: "msg", to: p.id, text: "Your legs are cramping. You crawl out from under the bed.", c: "#ffb74d" });
         continue;
       }
+    }
+    if (pe || pq) {
+      if (p.hidden) { leaveHiding(p); continue; }
       const which = pe ? "e" : "q";
       const spot = findTarget(S, p);
       const a = spot && spot[which];
@@ -550,6 +559,13 @@ function updatePlayers(S, inputs, dt) {
       if (p.act.t >= p.act.dur) { completeAction(S, p, f.a, f.spot); p.act = null; }
     }
   }
+}
+
+function underBed(p) { return p.hidden && tileAt(Math.floor(p.hideX), Math.floor(p.hideY)) === "b"; }
+function leaveHiding(p) {
+  if (underBed(p)) p.bedCD = BED_COOLDOWN;
+  p.hidden = false; p.seenHide = false; p.act = null; p.hideT = 0;
+  emit({ k: "creak", x: p.hideX, y: p.hideY, soft: true });
 }
 
 function dropItem(S, p) {
@@ -651,7 +667,8 @@ function completeAction(S, p, a, spot) {
     case "laundryUp": p.carry = "laundry"; S.laundry = "carried"; emit({ k: "rustle", x: at.x, y: at.y }); break;
     case "laundryPut": p.carry = null; S.laundry = "done"; completeTask(S, "laundry"); emit({ k: "creak", x: at.x, y: at.y, soft: true }); break;
     case "hide":
-      p.hidden = true; p.act = null;
+      if (tileAt(Math.floor(spot.tx), Math.floor(spot.ty)) === "b" && p.bedCD > 0) return;
+      p.hidden = true; p.act = null; p.hideT = 0;
       p.hideX = spot.tx; p.hideY = spot.ty;
       p.seenHide = st.mode === "in" && Math.hypot(st.x - p.x, st.y - p.y) < 7 && los(S, st.x, st.y, p.x, p.y);
       emit({ k: "creak", x: at.x, y: at.y, soft: true });
