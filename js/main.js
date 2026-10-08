@@ -238,7 +238,7 @@ function showEnd(result) {
     $("endTitle").textContent = win ? "THE END" : "HE GOT YOU";
     $("endTitle").style.color = win ? "#ffd180" : "#ff1744";
     $("endText").textContent = win
-      ? "You made it through all three nights at 14 Alder Lane. Aunt May is home. You're never house-sitting again."
+      ? "You made it through all three nights in Apartment 302. Aunt May is home. You're never apartment-sitting again."
       : "Night " + night + ". It was " + clockText(G.S ? G.S.mins : 0) + " when the last of you went quiet.";
     $("btnAgain").textContent = win ? (NET.peer ? "Back to Lobby" : "Play Again") : "Try Night " + night + " Again";
     $("btnAgain").classList.toggle("hidden", G.role !== "host");
@@ -486,11 +486,11 @@ function tickEffects(dt, now) {
   G.dread += ((inside ? 0.6 + heart * 0.4 : heart * 0.6) - G.dread) * Math.min(1, dt * 2);
   G.stingerCD -= dt;
   if (d < 7 && G.stingerCD <= 0 && los(S, G.me.x, G.me.y, sr.x, sr.y)) { SFX.play("stinger", 0.6); G.stingerCD = 15; }
-  const tvD = Math.hypot(10 - G.me.x, 15.5 - G.me.y), phD = Math.hypot(15.5 - G.me.x, 20.5 - G.me.y);
+  const tvD = Math.hypot(SPOTS.tv.x - G.me.x, SPOTS.tv.y - G.me.y), phD = Math.hypot(SPOTS.phone.x - G.me.x, SPOTS.phone.y - G.me.y);
   SFX.update(dt, {
     playing: G.phase === "play", power: S.power, dread: G.dread, heart: G.phase === "play" ? heart : 0,
-    tvVol: S.tv && S.power ? 0.25 / (1 + tvD * 0.3) : 0, tvPan: panFor(10, 15.5),
-    ringVol: S.phone > 0 ? 1 / (1 + phD * 0.15) : 0, ringPan: panFor(15.5, 20.5),
+    tvVol: S.tv && S.power ? 0.25 / (1 + tvD * 0.3) : 0, tvPan: panFor(SPOTS.tv.x, SPOTS.tv.y),
+    ringVol: S.phone > 0 ? 1 / (1 + phD * 0.15) : 0, ringPan: panFor(SPOTS.phone.x, SPOTS.phone.y),
   });
 }
 

@@ -152,9 +152,15 @@ function makeTextures() {
   };
   T.tile = ctex(128, 128, checker("#dfe9ee", "#a9c6d6", 4));
   T.tile2 = ctex(128, 128, checker("#f0eee8", "#2d2d33", 4));
+  // brick for the outside of the building
   T.siding = ctex(128, 128, (g, w, h) => {
-    g.fillStyle = "#5d6b78"; g.fillRect(0, 0, w, h);
-    for (let y = 0; y < h; y += 16) { g.fillStyle = "rgba(0,0,0,0.35)"; g.fillRect(0, y + 14, w, 2); g.fillStyle = "rgba(255,255,255,0.06)"; g.fillRect(0, y, w, 3); }
+    g.fillStyle = "#3a3634"; g.fillRect(0, 0, w, h);
+    for (let r = 0; r < 8; r++) for (let c = -1; c < 4; c++) {
+      const v = 0.75 + srand() * 0.4;
+      g.fillStyle = "rgb(" + Math.round(118 * v) + "," + Math.round(62 * v) + "," + Math.round(48 * v) + ")";
+      g.fillRect(c * 32 + (r % 2 ? 16 : 0) + 1, r * 16 + 1, 30, 14);
+    }
+    speckle(g, w, h, 500, "rgba(0,0,0,0.18)", 1);
   });
   T.grass = ctex(128, 128, (g, w, h) => { g.fillStyle = "#1f2e17"; g.fillRect(0, 0, w, h); speckle(g, w, h, 900, "rgba(80,110,45,0.35)", 2); speckle(g, w, h, 500, "rgba(0,0,0,0.3)", 2); });
   T.asphalt = ctex(128, 128, (g, w, h) => { g.fillStyle = "#1b1b1e"; g.fillRect(0, 0, w, h); speckle(g, w, h, 1500, "rgba(255,255,255,0.05)", 1); });
@@ -285,7 +291,7 @@ function roomForFace(tx, ty) {
   if (r) return r;
   for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
     const c = tileAt(tx + dx, ty + dy);
-    if (c === "." || c === "a" || "bnCuzoelLvcsgASkOMrTh".indexOf(c) >= 0) { const r2 = roomAt(tx + dx, ty + dy); if (r2) return r2; }
+    if (c === "." || c === "a" || "bnCuzoeLvcsgASkOMrThwH".indexOf(c) >= 0) { const r2 = roomAt(tx + dx, ty + dy); if (r2) return r2; }
   }
   return ROOM_BY_ID.hall;
 }
@@ -307,7 +313,8 @@ function setup3D() {
   W3.T = T;
 
   const M = {
-    siding: phong({ map: T.siding, emissive: 0x070a12 }),
+    siding: phong({ map: T.siding, emissiveMap: T.siding, emissive: 0x2c2c2c }),
+    ledge: phong({ color: 0x6b6560, emissive: 0x0b0b0c }),
     trim: phong({ color: 0xd9d1c2, shininess: 30 }),
     ceil: phong({ color: 0xe8e4dc }),
     roof: phong({ color: 0x24262c, emissive: 0x05060a }),
@@ -320,8 +327,8 @@ function setup3D() {
     blanket: phong({ color: 0x41618a }),
     blanket2: phong({ color: 0x9a5a4a }),
     pillow: phong({ color: 0xf1ede2 }),
-    sofa: phong({ color: 0x5f7a6a }),
-    sofaDark: phong({ color: 0x4a6253 }),
+    sofa: phong({ color: 0x8e2c2c }),
+    sofaDark: phong({ color: 0x6a1f22 }),
     counter: phong({ color: 0xdedbd2, shininess: 60 }),
     cabinet: phong({ color: 0x7d9aa6 }),
     closet: phong({ map: T.closet }),
@@ -355,7 +362,7 @@ function setup3D() {
   const gb = (k) => B[k] || (B[k] = new GeoBuilder());
   for (let z = 0; z < MAP_H; z++) for (let x = 0; x < MAP_W; x++) {
     const c = tileAt(x, z);
-    if (!inHouse(x, z)) continue;
+    if (!insideApt(x, z)) continue;
     if (!isWallTile(c)) {
       const r = roomForFace(x, z);
       gb(r.floor).rect([x, 0, z], [0, 0, 1], [1, 0, 0], 1, 1, z, x, 1, 1);
@@ -371,7 +378,7 @@ function setup3D() {
       const nx = x + dx, nz = z + dz, nb = tileAt(nx, nz);
       if (isWallTile(nb)) continue;
       const along = dx ? z : x;
-      if (!inHouse(nx, nz)) gb("siding").rect(o, u, [0, 1, 0], 1, WALL_H, along, 0, 1, 1);
+      if (!insideApt(nx, nz)) gb("siding").rect(o, u, [0, 1, 0], 1, WALL_H, along, 0, 1, 1);
       else gb(roomForFace(nx, nz).wall).rect(o, u, [0, 1, 0], 1, WALL_H, along, 0, 1, 1 / WALL_H);
     }
   }
@@ -388,17 +395,12 @@ function setup3D() {
     if (!/^wp|siding|trim/.test(k)) m.castShadow = false;
     world.add(m);
   }
-  const hw = HOUSE.x1 - HOUSE.x0 + 1, hd = HOUSE.y1 - HOUSE.y0 + 1;
   const ceilB = new GeoBuilder();
-  ceilB.rect([HOUSE.x0, WALL_H, HOUSE.y0], [1, 0, 0], [0, 0, 1], hw, hd, 0, 0, 1, 1);
-  const ceil = ceilB.mesh(M.ceil); ceil.castShadow = false; world.add(ceil);
-  // a gabled roof: two slopes meeting at a ridge along the house
-  const half = (hd + 0.6) / 2, rise = 1.7, slope = Math.hypot(half, rise), ang = Math.atan2(rise, half);
-  for (const s of [-1, 1]) {
-    const r = addBox(world, hw + 0.6, 0.12, slope, HOUSE.x0 + hw / 2, WALL_H + rise / 2 - 0.06, HOUSE.y0 + hd / 2 + s * half / 2, M.roof);
-    r.rotation.x = s * ang;
-    r.castShadow = false;
+  for (let z = HOUSE.y0; z <= HOUSE.y1; z++) for (let x = HOUSE.x0; x <= HOUSE.x1; x++) {
+    if (insideApt(x, z)) ceilB.rect([x, WALL_H, z], [1, 0, 0], [0, 0, 1], 1, 1, 0, 0, 1, 1);
   }
+  const ceil = ceilB.mesh(M.ceil); ceil.castShadow = false; world.add(ceil);
+  buildUpperFloors(world, M);
 
   buildOutside(world, M, T);
   buildFurniture(world, M, T);
@@ -440,11 +442,22 @@ function buildOutside(world, M, T) {
     const d = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.12), line);
     d.rotation.x = -Math.PI / 2; d.position.set(x, 0.008, 28.5); world.add(d);
   }
-  // front path and porch step
-  const path = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 3.0), M.sidewalk);
-  path.rotation.x = -Math.PI / 2; path.position.set(14.5, 0.007, 23.4); world.add(path);
-  addBox(world, 2.2, 0.12, 1.0, 14.5, 0, 22.4, M.sidewalk);
-  // fence and gate around the back yard
+  // paved areas: the courtyard and the path from its gate down to the street
+  const pave = (x0, z0, x1, z1) => {
+    const t = T.sidewalk.clone();
+    t.needsUpdate = true;
+    t.repeat.set(x1 - x0, z1 - z0);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, z1 - z0), phong({ map: t, emissive: 0x06070b }));
+    m.rotation.x = -Math.PI / 2; m.position.set((x0 + x1) / 2, 0.007, (z0 + z1) / 2);
+    m.receiveShadow = true;
+    world.add(m);
+  };
+  pave(22, 13, 28, 23);
+  pave(28, 19, 29.4, 24.8);
+  // the front step
+  const fd = ENTRIES[FRONT_DOOR];
+  addBox(world, fd.dx ? 0.7 : 1.3, 0.1, fd.dx ? 1.3 : 0.7, fd.x + 0.5 + fd.dx * 0.85, 0, fd.y + 0.5 + fd.dy * 0.85, M.sidewalk);
+  // fence and gate around the courtyard
   for (let z = 0; z < MAP_H; z++) for (let x = 0; x < MAP_W; x++) {
     const c = tileAt(x, z);
     if (c !== "f" && c !== "G") continue;
@@ -457,13 +470,22 @@ function buildOutside(world, M, T) {
       addBox(world, w, 1.4, d, x + 0.5, 0, z + 0.5, M.fence);
     }
   }
-  // outside trash bin (lid on top)
-  addBox(world, 0.7, 1.0, 0.75, 27.5, 0, 15.5, M.bin);
-  W3.binLid = addBox(world, 0.74, 0.06, 0.8, 27.5, 1.0, 15.5, M.bin);
-  W3.binBag = addBox(world, 0.42, 0.3, 0.42, 27.5, 0.98, 15.5, M.bag);
+  // the dumpster, with its lid propped open
+  for (const b of components("Z")) {
+    const x = b.x0 + 0.5, z = b.y0 + 0.5;
+    addBox(world, 1.0, 1.0, 0.9, x, 0.08, z, M.bin);
+    for (const [wx, wz] of [[-0.4, -0.35], [0.4, -0.35], [-0.4, 0.35], [0.4, 0.35]]) addCyl(world, 0.05, 0.05, 0.08, x + wx, 0, z + wz, M.black, 6);
+    const lid = new THREE.Group();
+    lid.position.set(x, 1.08, z - 0.45);
+    addBox(lid, 1.04, 0.05, 0.94, 0, 0, 0.47, M.bin);
+    lid.rotation.x = -0.45;
+    world.add(lid);
+    W3.binLid = lid;
+    W3.binBag = addBox(world, 0.42, 0.3, 0.42, x + 0.15, 0.95, z + 0.05, M.bag);
+  }
   W3.binBag.visible = false;
   // trees
-  for (const [tx, tz, s] of [[2.5, 4, 1.2], [3, 15, 1.1], [27, 4, 1.05], [2, 22, 0.9], [-5, 10, 1.4], [36, 8, 1.3], [-4, 20, 1.2], [34, 18, 1.1], [18, 2, 1.0]]) {
+  for (const [tx, tz, s] of [[3, 3, 1.1], [3.5, 19.5, 1.0], [-9, 6, 1.3], [38, 9, 1.3], [-9, 24, 1.2], [37, 21, 1.1], [30.5, 0.5, 1.0]]) {
     addCyl(world, 0.12 * s, 0.18 * s, 2.4 * s, tx, 0, tz, M.bark, 7);
     for (let i = 0; i < 3; i++) {
       const f = new THREE.Mesh(new THREE.IcosahedronGeometry((1.3 - i * 0.25) * s, 0), M.leaves);
@@ -473,7 +495,7 @@ function buildOutside(world, M, T) {
       world.add(f);
     }
   }
-  // parked car and a mailbox
+  // a parked car and the building's mailboxes by the path
   const car = new THREE.Group();
   const paint = phong({ color: 0x3a1414, shininess: 80, emissive: 0x050205 });
   addBox(car, 3.4, 0.7, 1.6, 0, 0.3, 0, paint);
@@ -484,21 +506,24 @@ function buildOutside(world, M, T) {
   }
   car.position.set(5, 0, 27.2);
   world.add(car);
-  addCyl(world, 0.05, 0.05, 1.1, 17, 0, 24.5, M.black, 6);
-  addBox(world, 0.25, 0.25, 0.45, 17, 1.1, 24.5, phong({ color: 0x2d4a6a }));
-  // the neighbours' houses
-  const houseMat = phong({ color: 0x1a1c22, emissive: 0x040508 });
+  const mailMat = phong({ color: 0x3d4f63, shininess: 40 });
+  for (const lx of [-0.45, 0.45]) addBox(world, 0.06, 0.6, 0.06, 30.3 + lx, 0, 24.2, M.black);
+  addBox(world, 1.2, 0.8, 0.45, 30.3, 0.6, 24.2, mailMat);
+  // the other buildings of Briar Court, and across the street
+  const blockMat = phong({ color: 0x1a1c22, emissive: 0x040508 });
   const litWin = new THREE.MeshBasicMaterial({ color: 0x9a7a40 });
   const darkWin = new THREE.MeshBasicMaterial({ color: 0x0b0d14 });
-  [[-11, 14, 9, 6, 14], [42, 14, 9, 6, 14], [15, -9, 20, 6, 8], [6, 36, 14, 6, 8], [26, 36, 12, 6, 8]].forEach(([hx, hz, w, h, d], hi) => {
-    addBox(world, w, h, d, hx, 0, hz, houseMat);
-    for (let i = 0; i < 4; i++) {
-      const win = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 1.1), (i + hi) % 4 === 0 ? litWin : darkWin);
-      const fy = 1.6 + (i % 2) * 2.2, off = -w / 3 + (i >> 1) * (w / 1.5);
+  [[-12, 14, 10, 8.4, 20], [41, 14, 10, 8.4, 20], [15, -10, 26, 8.4, 8], [6, 37, 14, 8.4, 8], [26, 37, 12, 8.4, 8]].forEach(([hx, hz, w, h, d], hi) => {
+    addBox(world, w, h, d, hx, 0, hz, blockMat);
+    const side = hz > 30 || hz < 0 ? w : d;
+    const n = Math.max(2, Math.floor(side / 2.6));
+    for (let f = 0; f < 3; f++) for (let i = 0; i < n; i++) {
+      const win = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 1.1), (i * 5 + f * 3 + hi * 7) % 6 === 0 ? litWin : darkWin);
+      const fy = 1.5 + f * 2.8, off = -side / 2 + (i + 0.5) * side / n;
       if (hz > 30) { win.position.set(hx + off, fy, hz - d / 2 - 0.02); win.rotation.y = Math.PI; }
       else if (hz < 0) win.position.set(hx + off, fy, hz + d / 2 + 0.02);
-      else if (hx < 0) { win.position.set(hx + w / 2 + 0.02, fy, hz + off * d / w); win.rotation.y = Math.PI / 2; }
-      else { win.position.set(hx - w / 2 - 0.02, fy, hz + off * d / w); win.rotation.y = -Math.PI / 2; }
+      else if (hx < 0) { win.position.set(hx + w / 2 + 0.02, fy, hz + off); win.rotation.y = Math.PI / 2; }
+      else { win.position.set(hx - w / 2 - 0.02, fy, hz + off); win.rotation.y = -Math.PI / 2; }
       world.add(win);
     }
   });
@@ -518,6 +543,71 @@ function buildOutside(world, M, T) {
   addBox(world, 0.12, 0.6, 0.45, BREAKER.x + 0.94, 1.1, BREAKER.y + 0.5, M.steel);
 }
 
+// a sign or number plate drawn on a canvas
+function signTex(w, h, bg, fg, text, font) {
+  return ctex(w, h, (g) => {
+    g.fillStyle = bg; g.fillRect(0, 0, w, h);
+    g.strokeStyle = fg; g.lineWidth = 3; g.strokeRect(3, 3, w - 6, h - 6);
+    g.fillStyle = fg; g.font = font; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(text, w / 2, h / 2 + 1);
+  });
+}
+
+// the two floors of apartments above yours, and the flat roof
+function buildUpperFloors(world, M) {
+  const UPPER = 2, FLOOR_H = 2.9, TOP = WALL_H + UPPER * FLOOR_H;
+  const walls = new GeoBuilder(), roof = new GeoBuilder(), band = new GeoBuilder();
+  const outward = (x, z) => [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dz]) => !insideApt(x + dx, z + dz));
+  for (let z = HOUSE.y0; z <= HOUSE.y1; z++) for (let x = HOUSE.x0; x <= HOUSE.x1; x++) {
+    if (!insideApt(x, z)) continue;
+    roof.rect([x, TOP, z + 1], [1, 0, 0], [0, 0, -1], 1, 1, x, z, 1, 1);
+    for (const [dx, dz] of outward(x, z)) {
+      let o, u;
+      if (dx === 1) { o = [x + 1, WALL_H, z + 1]; u = [0, 0, -1]; }
+      else if (dx === -1) { o = [x, WALL_H, z]; u = [0, 0, 1]; }
+      else if (dz === 1) { o = [x, WALL_H, z + 1]; u = [1, 0, 0]; }
+      else { o = [x + 1, WALL_H, z]; u = [-1, 0, 0]; }
+      walls.rect(o, u, [0, 1, 0], 1, TOP - WALL_H, dx ? z : x, WALL_H, 1, 1);
+      // ledges between the floors and a low parapet around the roof
+      const bx0 = dx === 1 ? x + 1 : dx === -1 ? x - 0.08 : x, bx1 = dx === 1 ? x + 1.08 : dx === -1 ? x : x + 1;
+      const bz0 = dz === 1 ? z + 1 : dz === -1 ? z - 0.08 : z, bz1 = dz === 1 ? z + 1.08 : dz === -1 ? z : z + 1;
+      for (let f = 0; f < UPPER; f++) band.box(bx0, WALL_H + f * FLOOR_H - 0.02, bz0, bx1, WALL_H + f * FLOOR_H + 0.14, bz1);
+      const px0 = dx === 1 ? x + 0.8 : x, px1 = dx === -1 ? x + 0.2 : x + 1;
+      const pz0 = dz === 1 ? z + 0.8 : z, pz1 = dz === -1 ? z + 0.2 : z + 1;
+      roof.box(px0, TOP, pz0, px1, TOP + 0.5, pz1);
+    }
+  }
+  for (const [b, mat] of [[walls, M.siding], [roof, M.roof], [band, M.ledge]]) {
+    const m = b.mesh(mat);
+    m.castShadow = false;
+    world.add(m);
+  }
+  // windows of the apartments upstairs, above yours and along the bare walls
+  const lit = new THREE.MeshBasicMaterial({ color: 0x9a7a40 }), tv = new THREE.MeshBasicMaterial({ color: 0x4a5a8a });
+  const dark = new THREE.MeshBasicMaterial({ color: 0x0b0d14 });
+  const spots = ENTRIES.map((E) => [E.x, E.y]).concat([[9, 6], [13, 6], [10, 22], [19, 22], [21, 15], [21, 21], [19, 10], [17, 8]]);
+  spots.forEach(([x, z], i) => {
+    const d = outward(x, z)[0];
+    if (!d) return;
+    for (let f = 0; f < UPPER; f++) {
+      const k = (i * 7 + f * 3) % 9;
+      const win = new THREE.Mesh(new THREE.PlaneGeometry(0.95, 1.2), k === 0 ? lit : k === 4 ? tv : dark);
+      win.position.set(x + 0.5 + d[0] * 0.52, WALL_H + f * FLOOR_H + 1.5, z + 0.5 + d[1] * 0.52);
+      win.rotation.y = Math.atan2(d[0], d[1]);
+      world.add(win);
+      const sill = addBox(world, d[0] ? 0.12 : 1.1, 0.06, d[0] ? 1.1 : 0.12, x + 0.5 + d[0] * 0.56, WALL_H + f * FLOOR_H + 0.86, z + 0.5 + d[1] * 0.56, M.ledge);
+      sill.castShadow = false;
+    }
+  });
+  // the building's name over the front door
+  const fd = ENTRIES[FRONT_DOOR];
+  const signT = signTex(256, 64, "#1d2026", "#c9b37a", "BRIAR COURT · 3", "bold 30px Georgia, serif");
+  const sign = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 0.5), phong({ map: signT, emissiveMap: signT, emissive: 0x555555 }));
+  sign.position.set(fd.x + 0.5 + fd.dx * 0.53, WALL_H + 0.45, fd.y + 0.5 + fd.dy * 0.53);
+  sign.rotation.y = Math.atan2(fd.dx, fd.dy);
+  world.add(sign);
+}
+
 // a framed picture on a wall face (x,z on the face, n = direction into the room)
 function addPicture(world, tex, x, y, z, nx, nz, w, h) {
   const g = new THREE.Group();
@@ -530,25 +620,58 @@ function addPicture(world, tex, x, y, z, nx, nz, w, h) {
   world.add(g);
 }
 
+// A group for furniture standing on tile box b, turned so its back (local -z)
+// is against the nearest wall; local +x runs along that wall.
+function againstWall(world, b) {
+  let dir = [0, -1];
+  for (const [dx, dz] of [[0, 1], [0, -1], [-1, 0], [1, 0]]) {
+    let wall = true;
+    for (let y = b.y0; y <= b.y1; y++) for (let x = b.x0; x <= b.x1; x++) {
+      const nx = x + dx, nz = y + dz;
+      if (nx >= b.x0 && nx <= b.x1 && nz >= b.y0 && nz <= b.y1) continue;
+      if (!isWallTile(tileAt(nx, nz))) wall = false;
+    }
+    if (wall) { dir = [dx, dz]; break; }
+  }
+  const g = new THREE.Group();
+  g.position.set((b.x0 + b.x1 + 1) / 2, 0, (b.y0 + b.y1 + 1) / 2);
+  g.rotation.y = Math.atan2(-dir[0], -dir[1]);
+  world.add(g);
+  return { g, w: dir[0] === 0 ? b.x1 - b.x0 + 1 : b.y1 - b.y0 + 1 };
+}
+
 function buildFurniture(world, M, T) {
   for (const b of components("b")) {
     const cx = (b.x0 + b.x1 + 1) / 2, cz = (b.y0 + b.y1 + 1) / 2, w = b.x1 - b.x0 + 1, d = b.y1 - b.y0 + 1;
     addBox(world, w - 0.1, 0.42, d - 0.1, cx, 0, cz, M.darkwood);
     addBox(world, w - 0.18, 0.18, d - 0.2, cx, 0.42, cz + 0.02, M.pillow);
-    addBox(world, w - 0.12, 0.08, d * 0.62, cx, 0.58, cz + d * 0.17, b.x0 < 15 ? M.blanket : M.blanket2);
+    addBox(world, w - 0.12, 0.08, d * 0.62, cx, 0.58, cz + d * 0.17, M.blanket);
     addBox(world, 0.6, 0.12, 0.35, cx - 0.4, 0.6, b.y0 + 0.35, M.pillow);
     addBox(world, 0.6, 0.12, 0.35, cx + 0.4, 0.6, b.y0 + 0.35, M.pillow);
     addBox(world, w, 1.05, 0.08, cx, 0, b.y0 + 0.05, M.darkwood);
   }
   for (const b of components("n")) {
-    addBox(world, 0.55, 0.55, 0.5, b.x0 + 0.5, 0, b.y0 + 0.3, M.midwood);
-    addCyl(world, 0.05, 0.08, 0.3, b.x0 + 0.5, 0.55, b.y0 + 0.3, M.brass, 8);
-    const shade = addCyl(world, 0.12, 0.18, 0.2, b.x0 + 0.5, 0.82, b.y0 + 0.3, M.lampshade, 12);
-    W3.nightLamp = shade;
+    const { g } = againstWall(world, b);
+    addBox(g, 0.55, 0.55, 0.5, 0, 0, -0.2, M.midwood);
+    addCyl(g, 0.05, 0.08, 0.3, 0, 0.55, -0.2, M.brass, 8);
+    W3.nightLamp = addCyl(g, 0.12, 0.18, 0.2, 0, 0.82, -0.2, M.lampshade, 12);
   }
-  for (const b of components("C")) addBox(world, 0.94, 2.25, 0.94, b.x0 + 0.5, 0, b.y0 + 0.5, M.closet);
+  for (const b of components("C")) {
+    const { g } = againstWall(world, b);
+    addBox(g, 0.94, 2.25, 0.7, 0, 0, -0.14, M.closet);
+  }
+  // the supply shelf in the laundry room: spare bulbs and planks
   for (const b of components("L")) {
-    addBox(world, 0.94, 2.3, 0.9, b.x0 + 0.5, 0, b.y0 + 0.5, M.closet);
+    const { g } = againstWall(world, b);
+    for (const sx of [-0.45, 0.45]) addBox(g, 0.04, 2.0, 0.45, sx, 0, -0.25, M.midwood);
+    for (const y of [0.08, 0.6, 1.1, 1.6, 1.97]) addBox(g, 0.94, 0.03, 0.45, 0, y, -0.25, M.midwood);
+    addBox(g, 0.18, 0.28, 0.14, -0.26, 1.13, -0.25, phong({ color: 0xe0752d }));
+    addBox(g, 0.16, 0.24, 0.12, -0.05, 1.13, -0.28, phong({ color: 0x3b7bd4 }));
+    addCyl(g, 0.08, 0.08, 0.16, 0.25, 1.63, -0.25, M.steel, 10);
+    addCyl(g, 0.08, 0.08, 0.16, 0.05, 1.63, -0.22, M.steel, 10);
+    W3.shelfBulbs = [0, 1, 2].map((i) => addBox(g, 0.1, 0.12, 0.1, -0.28 + i * 0.15, 0.63, -0.2, phong({ color: 0xf0e6c8 })));
+    W3.shelfPlanks = [];
+    for (let i = 0; i < 12; i++) W3.shelfPlanks.push(addBox(g, 0.86, 0.035, 0.13, 0, 0.11 + (i >> 1) * 0.04, -0.34 + (i % 2) * 0.16, M.board));
   }
   for (const b of components("u")) {
     const cx = (b.x0 + b.x1 + 1) / 2;
@@ -557,28 +680,46 @@ function buildFurniture(world, M, T) {
     addCyl(world, 0.02, 0.02, 0.25, b.x0 + 0.25, 0.55, b.y0 + 0.2, M.steel, 6);
   }
   for (const b of components("z")) {
-    addCyl(world, 0.08, 0.1, 0.75, b.x0 + 0.3, 0, b.y0 + 0.5, M.white);
-    addBox(world, 0.45, 0.15, 0.55, b.x0 + 0.3, 0.75, b.y0 + 0.5, M.white);
-    addBox(world, 0.03, 0.7, 0.5, b.x0 + 0.02, 1.15, b.y0 + 0.5, phong({ color: 0xbcd6e0, shininess: 140, specular: 0xffffff }));
+    const { g } = againstWall(world, b);
+    addCyl(g, 0.08, 0.1, 0.75, 0, 0, -0.25, M.white);
+    addBox(g, 0.55, 0.15, 0.45, 0, 0.75, -0.25, M.white);
+    addCyl(g, 0.015, 0.015, 0.15, 0, 0.9, -0.42, M.steel, 6);
+    addBox(g, 0.5, 0.7, 0.03, 0, 1.15, -0.485, phong({ color: 0xbcd6e0, shininess: 140, specular: 0xffffff }));
   }
   for (const b of components("o")) {
-    addBox(world, 0.42, 0.42, 0.55, b.x0 + 0.55, 0, b.y0 + 0.5, M.white);
-    addBox(world, 0.2, 0.45, 0.45, b.x0 + 0.88, 0.3, b.y0 + 0.5, M.white);
+    const { g } = againstWall(world, b);
+    addBox(g, 0.42, 0.42, 0.55, 0, 0, -0.08, M.white);
+    addBox(g, 0.45, 0.45, 0.2, 0, 0.3, -0.38, M.white);
   }
   for (const b of components("e")) {
-    addBox(world, 0.6, 0.05, 1.0, b.x0 + 0.32, 0.74, b.y0 + 0.5, M.lightwood);
-    for (const [lx, lz] of [[0.06, 0.06], [0.06, 0.94], [0.58, 0.06], [0.58, 0.94]]) addBox(world, 0.04, 0.74, 0.04, b.x0 + lx, 0, b.y0 + lz, M.lightwood);
-    addBox(world, 0.06, 0.32, 0.45, b.x0 + 0.12, 0.79, b.y0 + 0.5, M.black);
-    addBox(world, 0.42, 0.06, 0.42, b.x0 + 0.85, 0.45, b.y0 + 0.5, M.darkwood);
+    const { g } = againstWall(world, b);
+    addBox(g, 1.0, 0.05, 0.6, 0, 0.74, -0.18, M.lightwood);
+    for (const [lx, lz] of [[-0.46, -0.44], [0.46, -0.44], [-0.46, 0.08], [0.46, 0.08]]) addBox(g, 0.04, 0.74, 0.04, lx, 0, lz, M.lightwood);
+    addBox(g, 0.32, 0.18, 0.18, 0.22, 0.79, -0.32, M.black);
+    addCyl(g, 0.012, 0.012, 0.25, 0.34, 0.97, -0.38, M.steel, 4);
+    addBox(g, 0.42, 0.06, 0.42, 0, 0.45, 0.32, M.darkwood);
+    addBox(g, 0.42, 0.45, 0.05, 0, 0.5, 0.52, M.darkwood);
   }
-  for (const b of components("l")) {
-    addCyl(world, 0.24, 0.2, 0.4, b.x0 + 0.5, 0, b.y0 + 0.5, phong({ color: 0xc9b38a }), 10);
+  // washer and dryer; clean clothes wait in a basket on top of the dryer
+  for (const b of components("w")) {
+    const { g, w } = againstWall(world, b);
+    const glass = phong({ color: 0x1b2430, shininess: 120, specular: 0x667788 });
+    for (let i = 0; i < w; i++) {
+      const lx = -w / 2 + i + 0.5;
+      addBox(g, 0.88, 0.9, 0.7, lx, 0, -0.13, M.white);
+      addBox(g, 0.88, 0.12, 0.12, lx, 0.9, -0.42, M.white);
+      const door = addCyl(g, 0.24, 0.24, 0.03, lx, 0.27, 0.23, glass, 18);
+      door.rotation.x = Math.PI / 2;
+      door.position.y = 0.45;
+      addCyl(g, 0.03, 0.03, 0.02, lx + 0.3, 0.95, -0.35, M.black, 8);
+    }
     W3.laundry = new THREE.Group();
-    addBox(W3.laundry, 0.32, 0.08, 0.26, 0, 0, 0, phong({ color: 0x7aa3d8 }));
-    addBox(W3.laundry, 0.3, 0.08, 0.24, 0.02, 0.08, 0, phong({ color: 0xe8e0d0 }));
-    addBox(W3.laundry, 0.28, 0.08, 0.24, -0.02, 0.16, 0, phong({ color: 0xd87a7a }));
-    W3.laundry.position.set(b.x0 + 0.5, 0.36, b.y0 + 0.5);
-    world.add(W3.laundry);
+    addBox(W3.laundry, 0.5, 0.22, 0.38, 0, 0, 0, phong({ color: 0xd8d2c0 }));
+    addBox(W3.laundry, 0.4, 0.1, 0.3, 0, 0.18, 0, phong({ color: 0x7aa3d8 }));
+    addBox(W3.laundry, 0.3, 0.08, 0.24, 0.05, 0.27, 0.02, phong({ color: 0xe8e0d0 }));
+    addBox(W3.laundry, 0.26, 0.07, 0.2, -0.06, 0.33, -0.02, phong({ color: 0xd87a7a }));
+    W3.laundry.position.set(w / 2 - 0.5, 0.9, -0.1);
+    g.add(W3.laundry);
   }
   for (const b of components("v")) {
     const cx = (b.x0 + b.x1 + 1) / 2;
@@ -594,60 +735,72 @@ function buildFurniture(world, M, T) {
     world.add(scr);
     W3.tvPos = { x: cx, z: b.y0 + 0.9 };
   }
+  // the old chest that came with the apartment
+  for (const b of components("H")) {
+    const { g } = againstWall(world, b);
+    addBox(g, 0.85, 0.45, 0.5, 0, 0, -0.18, M.darkwood);
+    addBox(g, 0.87, 0.1, 0.52, 0, 0.45, -0.18, M.midwood);
+    for (const sx of [-0.3, 0.3]) addBox(g, 0.05, 0.57, 0.53, sx, 0, -0.18, M.black);
+    addBox(g, 0.08, 0.1, 0.03, 0, 0.32, 0.08, M.brass);
+  }
   for (const b of components("c")) {
     const cx = (b.x0 + b.x1 + 1) / 2;
     addBox(world, 1.4, 0.06, 0.7, cx, 0.4, b.y0 + 0.5, M.lightwood);
     for (const [lx, lz] of [[-0.62, -0.28], [0.62, -0.28], [-0.62, 0.28], [0.62, 0.28]]) addBox(world, 0.05, 0.4, 0.05, cx + lx, 0, b.y0 + 0.5 + lz, M.lightwood);
     addCyl(world, 0.05, 0.05, 0.1, cx + 0.3, 0.46, b.y0 + 0.5, M.red, 8);
   }
+  // the red love seat faces the TV
   for (const b of components("s")) {
     const w = b.x1 - b.x0 + 1, cx = (b.x0 + b.x1 + 1) / 2, z = b.y0;
     addBox(world, w - 0.1, 0.42, 0.9, cx, 0, z + 0.5, M.sofaDark);
     addBox(world, w - 0.1, 0.55, 0.22, cx, 0.3, z + 0.86, M.sofaDark);
-    for (let i = 0; i < 3; i++) addBox(world, (w - 0.6) / 3 - 0.04, 0.14, 0.62, b.x0 + 0.3 + (i + 0.5) * (w - 0.6) / 3, 0.42, z + 0.42, M.sofa);
+    for (let i = 0; i < 2; i++) addBox(world, (w - 0.6) / 2 - 0.04, 0.14, 0.62, b.x0 + 0.3 + (i + 0.5) * (w - 0.6) / 2, 0.42, z + 0.42, M.sofa);
     addBox(world, 0.22, 0.62, 0.9, b.x0 + 0.16, 0, z + 0.5, M.sofaDark);
     addBox(world, 0.22, 0.62, 0.9, b.x1 + 0.84, 0, z + 0.5, M.sofaDark);
   }
-  // kitchen: counters, sink, stove, microwave, fridge, drawer, trash can
+  // kitchen: counters with the drawer, sink, stove and microwave, then the fridge
   for (const ch of ["k", "S", "O", "M", "A"]) for (const b of components(ch)) {
-    const w = b.x1 - b.x0 + 1, cx = (b.x0 + b.x1 + 1) / 2;
-    addBox(world, w, 0.86, 0.85, cx, 0, b.y0 + 0.44, M.cabinet);
-    addBox(world, w, 0.05, 0.9, cx, 0.86, b.y0 + 0.45, M.counter);
-    addBox(world, w, 0.7, 0.36, cx, 1.55, b.y0 + 0.19, M.cabinet);
+    const { g, w } = againstWall(world, b);
+    addBox(g, w, 0.86, 0.85, 0, 0, -0.06, M.cabinet);
+    addBox(g, w, 0.05, 0.9, 0, 0.86, -0.05, M.counter);
+    addBox(g, w, 0.7, 0.36, 0, 1.55, -0.31, M.cabinet);
     if (ch === "S") {
-      addBox(world, 0.7, 0.04, 0.5, cx, 0.89, b.y0 + 0.5, M.steel);
-      addCyl(world, 0.02, 0.02, 0.3, cx, 0.91, b.y0 + 0.17, M.steel, 6);
-      W3.sinkDishes = addCyl(world, 0.13, 0.13, 0.08, cx - 0.12, 0.91, b.y0 + 0.5, M.white, 12);
+      addBox(g, 0.7, 0.04, 0.5, 0, 0.89, 0, M.steel);
+      addCyl(g, 0.02, 0.02, 0.3, 0, 0.91, -0.33, M.steel, 6);
+      W3.sinkDishes = addCyl(g, 0.13, 0.13, 0.08, -0.12, 0.91, 0, M.white, 12);
     }
     if (ch === "O") {
-      addBox(world, 0.8, 0.02, 0.7, cx, 0.91, b.y0 + 0.45, M.black);
-      for (const [bx, bz] of [[-0.2, 0.3], [0.2, 0.3], [-0.2, 0.62], [0.2, 0.62]]) addCyl(world, 0.11, 0.11, 0.02, cx + bx, 0.93, b.y0 + bz, phong({ color: 0x333333 }));
+      addBox(g, 0.8, 0.02, 0.7, 0, 0.91, -0.05, M.black);
+      for (const [bx, bz] of [[-0.2, -0.2], [0.2, -0.2], [-0.2, 0.12], [0.2, 0.12]]) addCyl(g, 0.11, 0.11, 0.02, bx, 0.93, bz, phong({ color: 0x333333 }));
     }
     if (ch === "M") {
-      addBox(world, 0.55, 0.32, 0.4, cx, 0.91, b.y0 + 0.35, M.black);
+      addBox(g, 0.55, 0.32, 0.4, 0, 0.91, -0.15, M.black);
       W3.microWin = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.22), new THREE.MeshBasicMaterial({ color: 0x111111 }));
-      W3.microWin.position.set(cx - 0.05, 1.07, b.y0 + 0.555);
-      world.add(W3.microWin);
-      W3.microPlate = addCyl(world, 0.1, 0.1, 0.03, cx - 0.05, 0.95, b.y0 + 0.35, M.white, 10);
+      W3.microWin.position.set(-0.05, 1.07, 0.055);
+      g.add(W3.microWin);
+      W3.microPlate = addCyl(g, 0.1, 0.1, 0.03, -0.05, 0.95, -0.15, M.white, 10);
     }
     if (ch === "A") {
-      for (const y of [0.3, 0.6]) addBox(world, 0.3, 0.03, 0.02, cx, y, b.y0 + 0.88, M.brass);
-      W3.battery = addBox(world, 0.12, 0.06, 0.06, cx, 0.91, b.y0 + 0.5, new THREE.MeshBasicMaterial({ color: 0xffd600 }));
+      for (const y of [0.3, 0.6]) addBox(g, 0.3, 0.03, 0.02, 0, y, 0.38, M.brass);
+      W3.battery = addBox(g, 0.12, 0.06, 0.06, 0, 0.91, 0, new THREE.MeshBasicMaterial({ color: 0xffd600 }));
     }
   }
   for (const b of components("r")) {
-    addBox(world, 0.88, 1.9, 0.8, b.x0 + 0.5, 0, b.y0 + 0.42, M.white);
-    addBox(world, 0.04, 0.4, 0.04, b.x0 + 0.15, 1.0, b.y0 + 0.84, M.steel);
+    const { g } = againstWall(world, b);
+    addBox(g, 0.88, 1.9, 0.8, 0, 0, -0.08, M.white);
+    addBox(g, 0.04, 0.4, 0.04, -0.35, 1.0, 0.34, M.steel);
   }
   for (const b of components("g")) {
-    addCyl(world, 0.2, 0.17, 0.6, b.x0 + 0.5, 0, b.y0 + 0.45, M.steel, 12);
-    W3.canBag = addCyl(world, 0.19, 0.19, 0.12, b.x0 + 0.5, 0.58, b.y0 + 0.45, M.bag, 10);
+    addCyl(world, 0.2, 0.17, 0.6, b.x0 + 0.5, 0, b.y0 + 0.5, M.steel, 12);
+    W3.canBag = addCyl(world, 0.19, 0.19, 0.12, b.x0 + 0.5, 0.58, b.y0 + 0.5, M.bag, 10);
   }
   for (const b of components("T")) {
     const cx = (b.x0 + b.x1 + 1) / 2, cz = (b.y0 + b.y1 + 1) / 2;
     addBox(world, 1.6, 0.05, 1.3, cx, 0.72, cz, M.lightwood);
     for (const [lx, lz] of [[-0.7, -0.55], [0.7, -0.55], [-0.7, 0.55], [0.7, 0.55]]) addBox(world, 0.06, 0.72, 0.06, cx + lx, 0, cz + lz, M.lightwood);
     for (const [px, pz, r] of [[0, -0.95, 0], [0, 0.95, Math.PI], [-1.05, 0, Math.PI / 2], [1.05, 0, -Math.PI / 2]]) {
+      // no chair where it would be jammed against a counter
+      if (tileAt(Math.floor(cx + Math.sign(px) * 1.2), Math.floor(cz + Math.sign(pz) * 1.2)) !== ".") continue;
       const ch = new THREE.Group();
       addBox(ch, 0.44, 0.06, 0.44, 0, 0.42, 0, M.midwood);
       addBox(ch, 0.44, 0.5, 0.05, 0, 0.48, -0.2, M.midwood);
@@ -668,23 +821,59 @@ function buildFurniture(world, M, T) {
     W3.phone = ph;
     W3.phonePos = { x: b.x0 + 0.5, z: b.y0 + 0.5 };
   }
-  // fuse box on the hallway side of its wall
+  // fuse box on the laundry room side of its wall
   for (const b of components("F")) {
-    addBox(world, 0.1, 0.7, 0.5, b.x0 - 0.05, 1.2, b.y0 + 0.5, M.steel);
+    const nx = isWallTile(tileAt(b.x0 - 1, b.y0)) ? 1 : -1; // which side the room is on
+    addBox(world, 0.1, 0.7, 0.5, b.x0 + (nx > 0 ? 1.05 : -0.05), 1.2, b.y0 + 0.5, M.steel);
     W3.fuseLed = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), new THREE.MeshBasicMaterial({ color: 0x00ff66 }));
-    W3.fuseLed.position.set(b.x0 - 0.11, 1.8, b.y0 + 0.68);
+    W3.fuseLed.position.set(b.x0 + (nx > 0 ? 1.11 : -0.11), 1.8, b.y0 + 0.68);
     world.add(W3.fuseLed);
   }
+  buildHole(world);
   // rugs, plants and pictures make it a home
   const rug = (w, d, x, z) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), M.rug); m.rotation.x = -Math.PI / 2; m.position.set(x, 0.006, z); m.receiveShadow = true; world.add(m); };
-  rug(3.4, 2.4, 10.6, 17.4);
-  rug(6, 1.3, 15.5, 12.95);
+  rug(3.0, 2.2, 10, 19.6);
+  rug(1.1, 8, 16, 11.8);
+  rug(2.6, 1.6, 10.6, 9.9);
   const plant = (x, z) => { addCyl(world, 0.18, 0.14, 0.35, x, 0, z, M.red, 10); const f = new THREE.Mesh(new THREE.IcosahedronGeometry(0.35, 0), phong({ color: 0x3f7a3a })); f.position.set(x, 0.65, z); f.castShadow = true; world.add(f); };
-  plant(8.5, 20.5); plant(22.5, 20.5); plant(8.5, 12.4);
-  addPicture(world, T.art[0], 12.5, 1.9, 21, 0, -1, 0.9, 0.62);
-  addPicture(world, T.art[1], 8, 1.9, 9, 1, 0, 0.5, 0.66);
-  addPicture(world, T.art[2], 17.5, 1.9, 14, 0, -1, 0.9, 0.62);
-  addPicture(world, T.art[1], 8, 1.9, 16.5, 1, 0, 0.5, 0.66);
+  plant(8.5, 21.4); plant(20.55, 17.45); plant(8.5, 11.5);
+  addPicture(world, T.art[0], 10, 1.95, 17, 0, 1, 0.9, 0.5);
+  addPicture(world, T.art[2], 10, 1.9, 22, 0, -1, 0.9, 0.62);
+  addPicture(world, T.art[1], 17, 1.9, 8.5, -1, 0, 0.5, 0.66);
+  addPicture(world, T.art[0], 15, 1.9, 12, 1, 0, 0.8, 0.55);
+  addPicture(world, T.art[1], 9.6, 1.9, 7, 0, 1, 0.5, 0.66);
+}
+
+// The hole in the bathroom wall. It's a crack on the first night and keeps growing.
+function buildHole(world) {
+  const h = SPOTS.hole, g = new THREE.Group();
+  const nx = isWallTile(tileAt(Math.floor(h.x) - 1, Math.floor(h.y))) ? 1 : -1;
+  g.position.set(Math.round(h.x), 1.05, h.y);
+  g.rotation.y = nx > 0 ? Math.PI / 2 : -Math.PI / 2;
+  world.add(g);
+  const jagged = (r, n) => {
+    const s = new THREE.Shape();
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2, rr = r * (0.7 + srand() * 0.55);
+      if (i) s.lineTo(Math.cos(a) * rr, Math.sin(a) * rr * 1.25); else s.moveTo(Math.cos(a) * rr, Math.sin(a) * rr * 1.25);
+    }
+    return new THREE.ShapeGeometry(s);
+  };
+  const plaster = new THREE.Mesh(jagged(0.3, 16), phong({ color: 0x8c8474 }));
+  plaster.position.z = 0.004;
+  const dark = new THREE.Mesh(jagged(0.2, 14), new THREE.MeshBasicMaterial({ color: 0x030202 }));
+  dark.position.z = 0.008;
+  const cracks = new THREE.Group();
+  const crackMat = new THREE.MeshBasicMaterial({ color: 0x2a2620 });
+  for (let i = 0; i < 7; i++) {
+    const len = 0.25 + srand() * 0.35, a = (i / 7) * Math.PI * 2 + srand() * 0.5;
+    const c = new THREE.Mesh(new THREE.PlaneGeometry(0.012, len), crackMat);
+    c.position.set(Math.cos(a) * len / 2, Math.sin(a) * len / 2, 0.006);
+    c.rotation.z = a - Math.PI / 2;
+    cracks.add(c);
+  }
+  g.add(plaster, dark, cracks);
+  W3.hole = { plaster, dark, cracks };
 }
 
 function buildEntries(world, M) {
@@ -724,6 +913,28 @@ function buildEntries(world, M) {
       o.door = makeDoor(g, M.extDoor);
       o.openRot = 1.6 * (inSign > 0 ? -1 : 1);
       o.bolt = addBox(g, 0.04, 0.04, 0.05, 0.36, 1.18, 0.05 * inSign, M.brass);
+      // the security chain: hooked across when locked, hanging loose when not
+      const link = new THREE.TorusGeometry(0.022, 0.007, 4, 8);
+      o.chainOn = new THREE.Group(); o.chainOff = new THREE.Group();
+      for (let i = 0; i < 8; i++) {
+        const a = new THREE.Mesh(link, M.steel);
+        a.position.set(0.14 + i * 0.045, 1.55 - Math.sin((i / 7) * Math.PI) * 0.035, 0.06 * inSign);
+        a.rotation.x = i % 2 ? Math.PI / 2 : 0;
+        o.chainOn.add(a);
+        const b = new THREE.Mesh(link, M.steel);
+        b.position.set(0.46, 1.53 - i * 0.03, 0.06 * inSign);
+        b.rotation.y = i % 2 ? Math.PI / 2 : 0;
+        o.chainOff.add(b);
+      }
+      addBox(g, 0.03, 0.09, 0.02, 0.47, 1.51, 0.05 * inSign, M.brass);
+      addBox(o.door, 0.16, 0.03, 0.02, 0.62, 1.54, 0.04 * inSign, M.brass);
+      g.add(o.chainOn, o.chainOff);
+      addCyl(o.door, 0.015, 0.015, 0.08, 0.47, 1.5, 0, M.brass, 8).rotation.x = Math.PI / 2;
+      const plateT = signTex(64, 32, "#2a1a12", "#d4af37", "302", "bold 20px Georgia, serif");
+      const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.1), phong({ map: plateT, emissiveMap: plateT, emissive: 0x444444 }));
+      plate.position.set(0.47, 1.72, -0.035 * inSign);
+      plate.rotation.y = inSign > 0 ? Math.PI : 0;
+      o.door.add(plate);
     }
     const heights = E.kind === "window" ? [1.15, 1.78, 1.47] : [0.6, 1.15, 1.72];
     const tilts = E.kind === "window" ? [0.28, -0.3, 0.05] : [0.14, -0.12, 0.04];
@@ -739,13 +950,17 @@ function buildEntries(world, M) {
     o.base = { x: g.position.x, z: g.position.z };
     return o;
   });
-  // room doors swing into the rooms (north of the hallway)
+  // room doors swing into their rooms
   W3.idoors = IDOORS.map((D) => {
     const g = new THREE.Group();
     g.position.set(D.x + 0.5, 0, D.y + 0.5);
+    const horiz = D.dir[1] !== 0; // the door sits in a wall that runs along x
+    if (!horiz) g.rotation.y = Math.PI / 2;
     world.add(g);
+    const inSign = horiz ? D.dir[1] : D.dir[0]; // +1 when local +z points into the room
     const hinge = makeDoor(g, M.door);
-    return { hinge, rot: 1.45, openRot: 1.45 };
+    const openRot = 1.45 * (inSign > 0 ? -1 : 1);
+    return { hinge, rot: openRot, openRot };
   });
   // light switches
   W3.switches = SWITCHES.map((sw) => {
@@ -768,7 +983,7 @@ function buildLights(scene, world, M) {
   // one warm ceiling light per room; the long hallway gets one in the middle
   W3.rooms = [];
   for (const r of ROOMS) {
-    const lx = r.id === "hall" ? 15 : r.lights[0][0], lz = r.id === "hall" ? 13 : r.lights[0][1];
+    const lx = r.lights[0][0], lz = r.lights[0][1];
     const l = new THREE.PointLight(0xffe4bd, 1.35, r.id === "hall" ? 11 : 9, 1.3);
     l.position.set(lx, WALL_H - 0.35, lz);
     scene.add(l);
@@ -780,14 +995,20 @@ function buildLights(scene, world, M) {
     });
     W3.rooms.push({ id: r.id, light: l, fixtures, base: 1.35 });
   }
-  // porch light, back yard light, street light
-  const fixture = (x, y, z) => { const m = addBox(world, 0.18, 0.22, 0.12, x, y, z, new THREE.MeshBasicMaterial({ color: 0xffd9a0 })); m.castShadow = false; return m; };
-  W3.porch = { light: new THREE.PointLight(0xffc98a, 1.1, 6, 1.6), fix: fixture(PORCH_LIGHT.x + 0.7, 2.0, 22.07) };
-  W3.porch.light.position.set(PORCH_LIGHT.x + 0.7, 2.0, 22.5);
-  scene.add(W3.porch.light);
-  W3.yardLight = { light: new THREE.PointLight(0xdfe8ff, 0, 8, 1.5), fix: fixture(24.07, 2.3, YARD_LIGHT.y) };
-  W3.yardLight.light.position.set(24.5, 2.3, YARD_LIGHT.y);
-  scene.add(W3.yardLight.light);
+  // the light by the front door, the courtyard's motion light, street lights.
+  // Spotlights aimed away from the building, so they don't shine through its walls.
+  const outLight = (spot, y, color, dist, angle) => {
+    const fx = isWallTile(tileAt(Math.floor(spot.x) - 1, Math.floor(spot.y))) ? 1 : -1;
+    const fix = addBox(world, 0.12, 0.22, 0.18, spot.x + fx * 0.03, y, spot.y, new THREE.MeshBasicMaterial({ color: 0xffd9a0 }));
+    fix.castShadow = false;
+    const light = new THREE.SpotLight(color, 0, dist, angle, 0.6, 1.4);
+    light.position.set(spot.x + fx * 0.3, y, spot.y);
+    light.target.position.set(spot.x + fx * 2.2, 0, spot.y + 0.8);
+    scene.add(light, light.target);
+    return { light, fix };
+  };
+  W3.porch = outLight(SPOTS.porch, 2.0, 0xffc98a, 9, 1.2);
+  W3.yardLight = outLight(SPOTS.yard, 2.4, 0xdfe8ff, 11, 1.1);
   W3.street = [];
   STREETLIGHTS.forEach((s, i) => {
     addCyl(world, 0.07, 0.09, 4.2, s.x, 0, s.y + 0.3, phong({ color: 0x333336 }), 8);
@@ -979,15 +1200,15 @@ function updateWorld(S, t, dt) {
     const st = S.rooms[r.id];
     const on = S.power && !flick && st.on && st.bulb;
     r.light.intensity = on ? r.base : 0;
-    for (const f of r.fixtures) f.material.color.setHex(on ? 0xfff3dc : st.bulb ? 0x4a4640 : 0x24221f);
+    for (const f of r.fixtures) f.material.color.setHex(on ? 0xfff3dc : st.bulb ? 0x34312c : 0x1c1b18);
   }
   if (W3.nightLamp) W3.nightLamp.material.emissive.setHex(S.power && S.rooms.bed1.on ? 0x6a5a40 : 0x000000);
   // outside lights: porch light runs on the house power; the yard light is motion-activated
-  W3.porch.light.intensity = S.power && !flick ? 1.1 : 0;
+  W3.porch.light.intensity = S.power && !flick ? 2.2 : 0;
   W3.porch.fix.material.color.setHex(S.power ? 0xffd9a0 : 0x2a2622);
   const st = S.stalker;
-  const motion = S.power && (Object.values(S.players).some((p) => inYard(p.x, p.y)) || (st.state !== "away" && st.x > 23.5 && st.x < 30 && st.y > 13 && st.y < 23));
-  W3.yardLight.light.intensity = lerpTo(W3.yardLight.light.intensity, motion ? 1.6 : 0, k);
+  const motion = S.power && (Object.values(S.players).some((p) => inYard(p.x, p.y)) || (st.state !== "away" && st.x > 22 && st.x < 29.5 && st.y > 12.5 && st.y < 23));
+  W3.yardLight.light.intensity = lerpTo(W3.yardLight.light.intensity, motion ? 2.4 : 0, k);
   W3.yardLight.fix.material.color.setHex(motion ? 0xf2f6ff : 0x2a2a2e);
   W3.fuseLed.material.color.setHex(S.power ? 0x00ff66 : (Math.floor(t * 3) % 2 ? 0xff1744 : 0x220000));
   if (W3.battery) W3.battery.visible = S.batteries > 0;
@@ -998,6 +1219,13 @@ function updateWorld(S, t, dt) {
   W3.binBag.visible = S.trash === "bin";
   W3.tablePlate.visible = !!S.plateOnTable;
   if (W3.laundry) W3.laundry.visible = S.laundry === "basket";
+  if (W3.shelfPlanks) W3.shelfPlanks.forEach((m, i) => (m.visible = i < S.closet.planks));
+  if (W3.shelfBulbs) W3.shelfBulbs.forEach((m, i) => (m.visible = i < S.closet.bulbs));
+  // the hole in the bathroom wall grows every night
+  const hs = [0, 0.12, 0.5, 1][S.night] || 1;
+  W3.hole.dark.scale.setScalar(hs);
+  W3.hole.plaster.scale.setScalar(S.night > 1 ? hs * 1.05 : 0.001);
+  W3.hole.cracks.scale.setScalar(0.5 + hs * 0.7);
   W3.microPlate.visible = S.micro.st !== "off";
   W3.microWin.material.color.setHex(S.micro.st === "cooking" ? 0xffcf6a : 0x111111);
   // TV static
@@ -1027,6 +1255,8 @@ function updateWorld(S, t, dt) {
       o.door.rotation.y = o.rot;
       o.door.rotation.z = e.broken ? 0.06 : 0;
       o.bolt.position.x = e.locked ? 0.36 : 0.3;
+      o.chainOn.visible = e.locked && !e.open && !e.broken;
+      o.chainOff.visible = !o.chainOn.visible;
     }
     o.boards.forEach((b, n) => {
       b.visible = n < e.boards;
@@ -1158,14 +1388,15 @@ function renderMenu(t, dt) {
   updateWorld(S, t, dt);
   const a = t * 0.05;
   const cam = W3.camera;
-  cam.position.set(15 + Math.cos(a) * 17, 2.6, 14 + Math.sin(a) * 15);
+  const c = SPOTS.center;
+  cam.position.set(c.x + Math.cos(a) * 20, 3.2, c.y + Math.sin(a) * 18);
   cam.rotation.set(0, 0, 0);
-  cam.lookAt(15, 1.6, 14);
+  cam.lookAt(c.x, 2.4, c.y);
   cam.updateMatrixWorld();
   const sa = -t * 0.09;
-  const sx = 15 + Math.cos(sa) * 12.5, sz = 14 + Math.sin(sa) * 10.8;
+  const sx = c.x + 1 + Math.cos(sa) * 16.5, sz = c.y + Math.sin(sa) * 12.5;
   W3.stalker.group.visible = true;
-  poseStalker(W3.stalker, sx, sz, Math.atan2(-Math.cos(sa) * 10.8, Math.sin(sa) * 12.5), t, {});
+  poseStalker(W3.stalker, sx, sz, Math.atan2(-Math.cos(sa) * 12.5, Math.sin(sa) * 16.5), t, {});
   W3.phantom.group.visible = false;
   for (const id in W3.players) { W3.scene.remove(W3.players[id].group); delete W3.players[id]; }
   setHeld(W3.held, W3, null);

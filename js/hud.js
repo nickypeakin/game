@@ -22,7 +22,7 @@ function txt(g, s, x, y, o = {}) {
 }
 
 const ITEM_NAMES = { food: "Frozen dinner", hot: "Hot dinner", plate: "Dirty plate", trash: "Trash bag", bulb: "Light bulb", laundry: "Clean laundry", plank: "Plank" };
-const MAP_X1 = 29, MAP_Y1 = 22; // minimap covers the house and the back yard
+const MAP_X1 = 27, MAP_Y1 = 22; // minimap covers the apartment and the courtyard
 
 function drawMinimap(g, S, me, t) {
   const s = R.W < 760 ? 4 : 6;
@@ -37,7 +37,7 @@ function drawMinimap(g, S, me, t) {
     else if (c === "y") g.fillStyle = "#1d2a18";
     else if (c === "f" || c === "G") g.fillStyle = "#4a3b2c";
     else if (c === "d") g.fillStyle = S.idoors[IDOOR_AT[x + "," + y]].open ? "#2a2a33" : "#b08d5a";
-    else if (c === ".") {
+    else if (c === "." || c === "a") {
       const r = roomAt(x, y), st = r && S.rooms[r.id];
       g.fillStyle = st && S.power && st.on && st.bulb ? "#3b3426" : "#1c1c22";
     } else g.fillStyle = "#3a4a5a";
@@ -52,7 +52,7 @@ function drawMinimap(g, S, me, t) {
     g.fillStyle = col; g.fillRect(mx - 1, my - 1, s + 2, s + 2);
     if (e.hit > 0) { g.strokeStyle = `rgba(255,255,255,${e.hit})`; g.lineWidth = 2; g.strokeRect(mx - 4, my - 4, s + 8, s + 8); }
   });
-  if (!S.power && Math.floor(t * 3) % 2) { g.fillStyle = "#ffeb3b"; g.fillRect(x0 + (23 - HOUSE.x0) * s - 1, y0 + (13 - HOUSE.y0) * s - 1, s + 2, s + 2); }
+  if (!S.power && Math.floor(t * 3) % 2) { g.fillStyle = "#ffeb3b"; g.fillRect(x0 + (Math.floor(SPOTS.fuse.x) - HOUSE.x0) * s - 1, y0 + (Math.floor(SPOTS.fuse.y) - HOUSE.y0) * s - 1, s + 2, s + 2); }
   for (const p of Object.values(S.players)) {
     const px = p.id === me.id ? me.x : p.x, py = p.id === me.id ? me.y : p.y;
     g.fillStyle = p.down ? "#888" : p.color;
@@ -110,7 +110,7 @@ function drawHUD(g, S, me, G, t) {
   // status line, chores, messages (left column)
   let y = 30;
   const colW = Math.max(220, Math.min(460, (narrow ? W - 40 : cx - cw / 2 - 30)));
-  if (!S.power) { if (Math.floor(t * 2) % 2 === 0) txt(g, "⚡ POWER OUT — fuse box at the end of the hall", 16, y, { size: 14, color: "#ff5252", maxW: colW }); y += 22; }
+  if (!S.power) { if (Math.floor(t * 2) % 2 === 0) txt(g, "⚡ POWER OUT — fuse box in the laundry room", 16, y, { size: 14, color: "#ff5252", maxW: colW }); y += 22; }
   if (S.stalker.mode === "in") { txt(g, "⚠ HE IS INSIDE THE HOUSE", 16, y, { size: 15, color: Math.floor(t * 4) % 2 ? "#ff1744" : "#fff" }); y += 22; }
   if (S.phone > 0) { txt(g, "☎ The landline is ringing (living room)", 16, y, { size: 13, color: "#b0bec5", maxW: colW }); y += 20; }
   if (narrow) y = Math.max(y, 100);

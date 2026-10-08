@@ -2,10 +2,12 @@
 
 A first-person 3D co-op horror game for the browser (made for Chromebooks).
 
-You're house-sitting for your aunt for three nights at 14 Alder Lane, a cosy one-floor
-house: a living room open to the kitchen, and a hallway to your bedroom, the bathroom and
-a guest room. Every evening you do the chores: heat up dinner, wash your plate, take the
-trash out to the bin, brush your teeth, lock up. Then you go to bed and wake up in the
+You're apartment-sitting for your aunt for three nights in Apartment 302 at Briar Court.
+The apartment is one floor, laid out like Room 302 from *Silent Hill 4: The Room*: the
+chained front door opens into the kitchen and living room, a laundry room sits by the
+door, and a hallway leads back to the bedroom and the bathroom (the one with the hole in
+the wall). Every evening you do the chores: heat up dinner, wash your plate, take the
+trash out to the dumpster, brush your teeth, lock up. Then you go to bed and wake up in the
 middle of the night. Night 1 is just weird. Night 2 is scary. On Night 3 he wants in.
 Play alone or with up to 5 friends.
 
@@ -40,14 +42,14 @@ save. After a minute the game is live at `https://<your-username>.github.io/<rep
 
 - **Chores** are listed on the left. Many need you to carry something from one place to
   another: a frozen dinner to the microwave, your hot dinner to the table, your plate to
-  the sink, the trash bag out the back door to the bin, clean laundry to your closet, a
-  spare bulb from the hall closet to the bathroom light.
-- **Doors and lights:** every room has a door you can open and close, and a light switch
-  by the doorway. Lock the front and back doors before bed (Q).
-- **At night** he walks around the house, knocks, looks in the windows, cuts the power
+  the sink, the trash bag out the front door to the dumpster in the courtyard, clean clothes
+  from the dryer to your closet, a spare bulb from the laundry room shelf to the bathroom light.
+- **Doors and lights:** every room has a door or archway, and a light switch by the
+  doorway. Lock the front door and put the chain on before bed (Q).
+- **At night** he walks around the building, knocks, looks in the windows, cuts the power
   and tries to get in. Shine your flashlight in his face through a window to scare him
-  off. The fuse box is at the end of the hall. Planks for boarding up windows and doors
-  are in the hall closet.
+  off. The fuse box is in the laundry room. Planks for boarding up windows and doors
+  are on the laundry room shelf.
 - **If he gets in,** hide in a closet or under a bed. If he sees you hide, he'll find
   you. Friends can help you up if you get caught. If everyone is caught, you can try
   that night again.
@@ -65,9 +67,9 @@ save. After a minute the game is live at `https://<your-username>.github.io/<rep
 ## Files
 
 - `index.html`, `style.css`: page and menus
-- `js/map.js`: the house layout, rooms, light switches
+- `js/map.js`: the apartment layout (Room 302), rooms, light switches
 - `js/sim.js`: game rules, chores, the story for each night and the stalker (runs on the host)
-- `js/world3d.js`: the 3D apartment, lighting, flashlights and characters
+- `js/world3d.js`: the 3D apartment and building, lighting, flashlights and characters
 - `js/hud.js`: the on-screen clock, minimap, prompts and messages
 - `js/audio.js`: sound effects
 - `js/main.js`: menus, input, networking and the main loop

@@ -24,16 +24,16 @@ const NIGHTS = {
 const TASK_LABELS = {
   eat: "Heat up a dinner from the fridge and eat it",
   dishes: "Wash your plate in the kitchen sink",
-  trash: "Take the trash bag out to the bin in the yard",
+  trash: "Take the trash bag out to the dumpster",
   teeth: "Brush your teeth",
-  lock: "Lock the front door and the back door",
-  bulb: "Replace the dead bathroom bulb (spares: hall closet)",
-  laundry: "Put the clean laundry away in your closet",
+  lock: "Lock the front door and put the chain on",
+  bulb: "Replace the dead bathroom bulb (spares: laundry room)",
+  laundry: "Take the clothes out of the dryer, put them in your closet",
   batteries: "Grab spare flashlight batteries (kitchen drawer)",
-  board: "Board up 3 windows (planks: hall closet)",
+  board: "Board up 3 windows (planks: laundry room)",
   bed: "Go to bed",
   check: "Find out what made that noise",
-  power: "Get the power back on (fuse box, end of the hall)",
+  power: "Get the power back on (fuse box, laundry room)",
   survive: "Survive until 6:00 AM",
 };
 const EVENING_TASKS = {
@@ -153,7 +153,7 @@ function roomLit(S, x, y) {
   return S.power && st.on && st.bulb;
 }
 function inYard(x, y) { return tileAt(Math.floor(x), Math.floor(y)) === "y"; }
-function inHouse(x, y) { return x >= HOUSE.x0 && x < HOUSE.x1 + 1 && y >= HOUSE.y0 && y < HOUSE.y1 + 1; }
+function inHouse(x, y) { return insideApt(Math.floor(x), Math.floor(y)); }
 
 // ------------------------------ chores --------------------------------------
 function task(S, id) { return S.tasks.find((t) => t.id === id); }
@@ -202,10 +202,13 @@ function allSpots(S, p) {
       }
     }
   }
+  // the hole in the bathroom wall
+  const hd = Math.hypot(SPOTS.hole.x - p.x, SPOTS.hole.y - p.y);
+  if (hd < 1.2) consider({ tx: SPOTS.hole.x, ty: SPOTS.hole.y, e: doAct("hole", "peek", S.night >= 2 ? "Look through the hole in the wall" : "Look at the crack in the wall", 0.6) }, hd - 0.4);
   const cx = Math.floor(p.x), cy = Math.floor(p.y);
   for (let ty = cy - 2; ty <= cy + 2; ty++) for (let tx = cx - 2; tx <= cx + 2; tx++) {
     const c = tileAt(tx, ty);
-    if ("dDBWrMTSgZzoLAlCbvhF".indexOf(c) < 0) continue;
+    if ("dDWrMTSgZzoLAwCbvhFH".indexOf(c) < 0) continue;
     const nx = clamp(p.x, tx, tx + 1), ny = clamp(p.y, ty, ty + 1);
     const d = Math.hypot(p.x - nx, p.y - ny);
     if (d > 0.85) continue;
@@ -235,7 +238,7 @@ function tileSpot(S, p, c, tx, ty) {
       const i = IDOOR_AT[k], dr = S.idoors[i];
       return { e: doAct("id" + i, "idoor", dr.open ? "Close the door" : "Open the door", 0.2, i) };
     }
-    case "D": case "B": {
+    case "D": {
       const i = ENTRY_AT[k], e = S.entries[i], E = ENTRIES[i], nm = E.name.toLowerCase();
       const out = inYard(p.x, p.y);
       if (p.carry === "plank" && !out) {
@@ -249,7 +252,7 @@ function tileSpot(S, p, c, tx, ty) {
       if (e.open) spot.e = doAct("e" + i, "edoor", "Close the " + nm, 0.25, i);
       else if (e.locked) spot.e = noteAct("e" + i, "Locked" + (out ? "" : " — press Q to unlock"));
       else spot.e = doAct("e" + i, "edoor", "Open the " + nm, 0.25, i);
-      if (!e.open && !out) spot.q = doAct("l" + i, "lock", e.locked ? "Unlock" : "Lock the " + nm, 0.5, i);
+      if (!e.open && !out) spot.q = doAct("l" + i, "lock", e.locked ? "Take the chain off and unlock" : "Lock it and put the chain on", 0.6, i);
       return spot;
     }
     case "W": {
@@ -289,18 +292,20 @@ function tileSpot(S, p, c, tx, ty) {
       const plankOk = S.closet.planks > 0 && (empty || (p.carry === "plank" && p.carryN < MAX_PLANKS));
       if (wantBulb) spot.e = doAct("closetB", "bulbTake", "Take a light bulb", 0.6);
       if (plankOk) spot[spot.e ? "q" : "e"] = doAct("closetP", "plankTake", "Take a plank (" + S.closet.planks + " left)", 0.5);
-      if (!spot.e) spot.e = noteAct("closet", S.closet.planks <= 0 && S.stage === "night" ? "Hall closet — no planks left" : "Hall closet — towels and old junk");
+      if (!spot.e) spot.e = noteAct("closet", S.closet.planks <= 0 && S.stage === "night" ? "Supply shelf — no planks left" : "Supply shelf — detergent and old junk");
       return spot;
     }
     case "A":
       if (S.batteries <= 0) return { e: noteAct("drawer", "Junk drawer — no batteries left") };
       if (p.bat >= 95 && !hasTask(S, "batteries")) return { e: noteAct("drawer", "Junk drawer (your flashlight is full)") };
       return { e: doAct("drawer", "batt", "Take flashlight batteries", 0.8) };
-    case "l":
-      if (S.laundry === "basket") return { e: empty ? doAct("basket", "laundryUp", "Pick up the clean laundry", 0.6) : noteAct("basket", "Your hands are full") };
-      return null;
+    case "w":
+      if (S.laundry === "basket") return { e: empty ? doAct("dryer", "laundryUp", "Take the clean clothes out of the dryer", 0.8) : noteAct("dryer", "Your hands are full") };
+      return { e: noteAct("dryer", "Washer and dryer") };
+    case "H":
+      return { e: noteAct("chest", "An old wooden chest. It's locked.") };
     case "C": {
-      if (p.carry === "laundry" && tx === 12 && ty === 7) return { e: doAct("h" + k, "laundryPut", "Put the laundry away", 1.2) };
+      if (p.carry === "laundry" && tx === SPOTS.closet.x && ty === SPOTS.closet.y) return { e: doAct("h" + k, "laundryPut", "Put the clothes away", 1.2) };
       return { e: doAct("h" + k, "hide", "Hide in the closet", 0.35, k) };
     }
     case "b": {
@@ -411,7 +416,7 @@ function startMorning(S) {
   const lines = {
     1: ["6:00 AM. The sun is coming up.", "Whoever it was, they're gone. The back gate is hanging open."],
     2: ["6:00 AM. The police came by.", "They found muddy footprints under every single window.", "\"Call us if he comes back,\" they said. Your aunt gets home in two days."],
-    3: ["6:00 AM. Sirens. Red and blue light through the cracks in the boards.", "They never found him. But in the bushes by the gate, the police found a key.", "A key to your aunt's back door."],
+    3: ["6:00 AM. Sirens. Red and blue light through the cracks in the boards.", "They never found him. But behind the hole in the bathroom wall, the police found a crawlspace.", "Someone had been living in it."],
   }[S.night];
   emit({ k: "card", title: S.night === LAST_NIGHT ? "YOU SURVIVED" : "MORNING", lines, t: 8.5 });
   emit({ k: "morning" });
@@ -464,7 +469,7 @@ function simStep(S, inputs, dt) {
   if (S.micro.st === "cooking") {
     S.micro.t -= dt;
     if (S.micro.t <= 0 || !S.power) {
-      if (S.power) { S.micro.st = "ready"; emit({ k: "ding", x: 21.5, y: 15.5 }); }
+      if (S.power) { S.micro.st = "ready"; emit({ k: "ding", x: SPOTS.micro.x, y: SPOTS.micro.y }); }
       else { S.micro.st = "ready"; }
     }
   }
@@ -480,9 +485,8 @@ function simStep(S, inputs, dt) {
 function updateTasks(S) {
   const lockT = task(S, "lock");
   if (lockT) {
-    const f = S.entries[FRONT_DOOR], b = S.entries[BACK_DOOR];
-    const ok = (e) => (e.locked && !e.open) || e.boards > 0;
-    const now = ok(f) && ok(b);
+    const f = S.entries[FRONT_DOOR];
+    const now = (f.locked && !f.open) || f.boards > 0;
     if (now && !lockT.done) completeTask(S, "lock");
     else if (!now && lockT.done) lockT.done = false;
   }
@@ -617,6 +621,15 @@ function completeAction(S, p, a, spot) {
     case "trashBin": p.carry = null; S.trash = "bin"; completeTask(S, "trash"); emit({ k: "bin", x: at.x, y: at.y }); break;
     case "teeth": completeTask(S, "teeth"); emit({ k: "brush", x: at.x, y: at.y }); break;
     case "flush": emit({ k: "flush", x: at.x, y: at.y }); break;
+    case "peek": {
+      const night = S.stage === "night";
+      const text = S.night === 1 ? "A thin crack in the plaster. Cold air is coming through it."
+        : S.night === 2 ? (night ? "It's pitch black in there. Something shifts and goes still." : "The crack has opened into a hole. It smells like wet dirt in there.")
+        : night ? "You put your eye to the hole. Something on the other side blinks." : "The hole is as big as your fist now. It goes back much further than the wall should.";
+      emit({ k: "msg", to: p.id, text, c: "#ce93d8" });
+      if (S.night === 3 && night) emit({ k: "stinger", to: p.id });
+      break;
+    }
     case "bulbTake": if (S.closet.bulbs > 0) { S.closet.bulbs--; p.carry = "bulb"; emit({ k: "grab", x: at.x, y: at.y }); } break;
     case "bulbPut":
       if (p.carry !== "bulb") return;
@@ -687,50 +700,50 @@ const textMsg = (text) => () => emit({ k: "text", text });
 const anyPlayer = (S, f) => Object.values(S.players).some((p) => !p.down && f(p));
 const nearWindow = (S, key, r) => { const E = ENTRIES[ENTRY_AT[key]]; return anyPlayer(S, (p) => Math.hypot(p.x - E.ix, p.y - E.iy) < r); };
 
-function ring(S, msg) { if (S.phone <= 0) { S.phone = 24; S.phoneMsg = msg; emit({ k: "msg", text: "The landline is ringing in the living room...", c: "#b0bec5" }); } }
+function ring(S, msg) { if (S.phone <= 0) { S.phone = 24; S.phoneMsg = msg; emit({ k: "msg", text: "The phone is ringing in the living room...", c: "#b0bec5" }); } }
 function knockAt(S, i, heavy) { const E = ENTRIES[i]; emit({ k: heavy ? "bang" : "knock", x: E.x + 0.5, y: E.y + 0.5 }); if (heavy) S.entries[i].hit = 1; }
 function watch(S, x, y, dur, seenMsg) {
   const st = S.stalker;
   Object.assign(st, { mode: "out", state: "watch", x, y, timer: dur, seenT: 0, msg: seenMsg, path: [] });
-  st.a = Math.atan2(14 - y, 15 - x);
+  st.a = Math.atan2(SPOTS.center.y - y, SPOTS.center.x - x);
 }
 function goAway(S) { Object.assign(S.stalker, { mode: "out", state: "away", x: -30, y: -30, path: [], timer: 9999 }); }
 
 const STORY = {
   "1evening": [
-    { at: 0.3, fn: () => emit({ k: "card", title: "NIGHT 1 — MONDAY", lines: ["You're house-sitting for your aunt May at 14 Alder Lane.", "She left a list of chores. It's a quiet street.", "Mostly."], t: 7 }) },
+    { at: 0.3, fn: () => emit({ k: "card", title: "NIGHT 1 — MONDAY", lines: ["You're apartment-sitting for your aunt May. Apartment 302, Briar Court.", "She left a list of chores. It's a quiet building.", "Mostly."], t: 7 }) },
     { at: 10, fn: say("Your chores are listed on the left. Start with dinner: frozen meals are in the fridge.", "#ffe082") },
-    { at: 95, fn: textMsg("hey neighbor :) welcome to alder lane") },
-    { after: "eat", delay: 30, fn: (S) => { if (!S.tv) { S.tv = true; emit({ k: "click", x: 10, y: 15.5 }); } say("The TV turned itself on. Weird.")(); } },
-    { id: "yard", when: (S) => anyPlayer(S, (p) => inYard(p.x, p.y)) && !taskDone(S, "trash"), fn: (S) => watch(S, 26.5, 24.6, 12, "...was someone standing past the fence?") },
+    { at: 95, fn: textMsg("hey neighbor :) welcome to briar court") },
+    { after: "eat", delay: 30, fn: (S) => { if (!S.tv) { S.tv = true; emit({ k: "click", x: SPOTS.tv.x, y: SPOTS.tv.y }); } say("The TV turned itself on. Weird.")(); } },
+    { id: "yard", when: (S) => anyPlayer(S, (p) => inYard(p.x, p.y)) && !taskDone(S, "trash"), fn: (S) => watch(S, SPOTS.watchFence.x, SPOTS.watchFence.y, 12, "...was someone standing past the fence?") },
     { id: "knock", after: "teeth", delay: 14, fn: (S) => { knockAt(S, FRONT_DOOR); say("Someone's knocking at the front door. At this hour?")(); } },
     { after: "teeth", delay: 45, fn: textMsg("nice pajamas") },
   ],
   "1night": [
     { at: 0.5, fn: (S) => { knockAt(S, FRONT_DOOR, true); emit({ k: "card", title: "2:47 AM", lines: ["Something woke you up.", "Three slow knocks on the front door."], t: 5 }); } },
     { at: 75, fn: (S) => ring(S, "...you looked so peaceful sleeping.") },
-    { at: 140, fn: (S) => emit({ k: "scratch", x: 10.5, y: 6.5 }) },
+    { at: 140, fn: (S) => { const E = ENTRIES[ENTRY_AT["7,8"]]; emit({ k: "scratch", x: E.x + 0.5, y: E.y + 0.5 }); } },
   ],
   "2evening": [
-    { at: 0.3, fn: () => emit({ k: "card", title: "NIGHT 2 — TUESDAY", lines: ["Aunt May called: \"Mrs. Pell next door saw a man in a white mask on our lawn last night.\"", "\"Lock everything. I'll be home Thursday.\"", "The bathroom light is dead."], t: 8 }) },
-    { at: 60, fn: textMsg("you forgot to close the bathroom blinds last night") },
+    { at: 0.3, fn: () => emit({ k: "card", title: "NIGHT 2 — TUESDAY", lines: ["Aunt May called: \"Mrs. Pell in 303 saw a man in a white mask outside our windows last night.\"", "\"Keep the chain on the door. I'll be home Thursday.\"", "The bathroom light is dead. And there's a crack in the bathroom wall you don't remember."], t: 9 }) },
+    { at: 60, fn: textMsg("you forgot to close the bedroom blinds last night") },
     { at: 130, fn: (S) => { if (S.power) { S.flick = 2.5; emit({ k: "flicker" }); } } },
-    { id: "street", when: (S) => S.dir.t > 90 && (nearWindow(S, "10,21", 3.5) || nearWindow(S, "7,19", 3.5)), fn: (S) => watch(S, 10.5, 24.9, 14, "He was standing under the streetlight. Staring at the house.") },
+    { id: "street", when: (S) => S.dir.t > 90 && (nearWindow(S, "7,18", 3.5) || nearWindow(S, "7,20", 3.5)), fn: (S) => watch(S, 3.5, 19.5, 14, "He was standing outside the living room window. Staring in.") },
     { after: "laundry", delay: 12, fn: (S) => {
-      const e = S.entries[BACK_DOOR];
-      emit({ k: "rattle", x: 23.5, y: 18.5 });
-      if (!e.locked && !e.open && !e.boards) { e.open = true; emit({ k: "creak", x: 23.5, y: 18.5, heavy: true }); say("The back door just swung open by itself...", "#ff8a80")(); }
-      else say("Someone just tried the back door handle.", "#ff8a80")();
+      const e = S.entries[FRONT_DOOR], E = ENTRIES[FRONT_DOOR];
+      emit({ k: "rattle", x: E.x + 0.5, y: E.y + 0.5 });
+      if (!e.locked && !e.open && !e.boards) { e.open = true; emit({ k: "creak", x: E.x + 0.5, y: E.y + 0.5, heavy: true }); say("The front door just swung open by itself...", "#ff8a80")(); }
+      else say("Someone just tried the front door. The chain rattled.", "#ff8a80")();
     } },
     { after: "dishes", delay: 25, fn: (S) => ring(S, "...what's for dessert?") },
-    { id: "gate", when: (S) => anyPlayer(S, (p) => inYard(p.x, p.y)) && !taskDone(S, "trash"), fn: (S) => watch(S, 30.4, 18.5, 8, "Something moved by the gate.") },
+    { id: "gate", when: (S) => anyPlayer(S, (p) => inYard(p.x, p.y)) && !taskDone(S, "trash"), fn: (S) => watch(S, SPOTS.watchGate.x, SPOTS.watchGate.y, 8, "Something moved by the gate.") },
   ],
   "2night": [
-    { at: 0.5, fn: () => { emit({ k: "card", title: "3:12 AM", lines: ["It's pitch black. The power's out.", "Someone is walking around the house."], t: 5 }); emit({ k: "powerout" }); } },
-    { at: 10, fn: say("There are planks in the hall closet. Board up the windows.", "#ffe082") },
+    { at: 0.5, fn: () => { emit({ k: "card", title: "3:12 AM", lines: ["It's pitch black. The power's out.", "Someone is walking around the building."], t: 5 }); emit({ k: "powerout" }); } },
+    { at: 10, fn: say("There are planks on the shelf in the laundry room. Board up the windows.", "#ffe082") },
   ],
   "3evening": [
-    { at: 0.3, fn: () => emit({ k: "card", title: "NIGHT 3 — WEDNESDAY", lines: ["Aunt May gets home in the morning. One more night.", "Uncle Ray left planks in the hall closet.", "He's already out there. Board up the windows. Lock the doors."], t: 8 }) },
+    { at: 0.3, fn: () => emit({ k: "card", title: "NIGHT 3 — WEDNESDAY", lines: ["Aunt May gets home in the morning. One more night.", "The super left planks in the laundry room. The hole in the bathroom wall is bigger.", "He's already out there. Board up the windows. Chain the door."], t: 9 }) },
     { at: 45, fn: textMsg("tonight.") },
     { at: 150, fn: (S) => { if (S.power) { S.power = false; emit({ k: "powerout" }); say("The power just went out. And it's not even midnight.", "#ff5252", true)(); } } },
     { at: 210, fn: textMsg("i'm right outside your kitchen") },
@@ -739,7 +752,7 @@ const STORY = {
     { at: 0.5, fn: (S) => {
       const open = S.entries.map((e, i) => i).filter((i) => ENTRIES[i].kind === "window" && S.entries[i].boards === 0);
       if (open.length) { const i = pick(open); S.entries[i].broken = true; const E = ENTRIES[i]; emit({ k: "glass", x: E.x + 0.5, y: E.y + 0.5 }); S.nextTarget = i; }
-      else knockAt(S, BACK_DOOR, true);
+      else knockAt(S, FRONT_DOOR, true);
       emit({ k: "stinger" });
       emit({ k: "card", title: "1:58 AM", lines: [open.length ? "Glass breaking." : "BANG. BANG. BANG.", "He's done waiting."], t: 5 });
     } },
@@ -849,7 +862,7 @@ function stalkerDecide(S) {
     st.target = pick(windows); st.next = "peek";
     goTo(st, ENTRIES[st.target].ox, ENTRIES[st.target].oy, passOut);
   } else if (A === 1) {
-    st.target = pick([FRONT_DOOR, BACK_DOOR, pick(windows.length ? windows : [FRONT_DOOR])]);
+    st.target = pick([FRONT_DOOR, FRONT_DOOR, pick(windows.length ? windows : [FRONT_DOOR])]);
     st.next = "knock";
     goTo(st, ENTRIES[st.target].ox, ENTRIES[st.target].oy, passOut);
   } else {
@@ -1023,7 +1036,7 @@ function updateStalker(S, dt) {
           if (S.power) {
             S.power = false;
             emit({ k: "powerout" });
-            emit({ k: "msg", text: "THE POWER WENT OUT. Fix the fuse box at the end of the hall!", c: "#ff5252", big: true });
+            emit({ k: "msg", text: "THE POWER WENT OUT. Fix the fuse box in the laundry room!", c: "#ff5252", big: true });
           }
           st.state = "wander"; st.timer = wanderDelay(S); wanderOutside(S);
         }
@@ -1099,7 +1112,7 @@ function updateEvents(S, dt) {
   switch (ev) {
     case "scratch": { const E = pick(winE); emit({ k: "scratch", x: E.x + 0.5, y: E.y + 0.5 }); break; }
     case "phone": ring(S, null); break;
-    case "tv": if (!S.tv && S.power) { S.tv = true; emit({ k: "click", x: 10, y: 15.5 }); emit({ k: "msg", text: "The TV turned on by itself.", c: "#b0bec5" }); } break;
+    case "tv": if (!S.tv && S.power) { S.tv = true; emit({ k: "click", x: SPOTS.tv.x, y: SPOTS.tv.y }); emit({ k: "msg", text: "The TV turned on by itself.", c: "#b0bec5" }); } break;
     case "flicker": if (S.power) { S.flick = 1.8; emit({ k: "flicker" }); } break;
     case "text": emit({ k: "text", to: who, text: pick(TEXTS).replace("{n}", S.n).replace("{e}", pick(ENTRIES).name.toLowerCase()) }); break;
     case "whisper": emit({ k: "whisper", to: who }); break;
