@@ -51,7 +51,8 @@ save. After a minute the game is live at `https://<your-username>.github.io/<rep
   off. The fuse box is in the laundry room. Planks for boarding up windows and doors
   are on the laundry room shelf.
 - **If he gets in,** hide in a closet or under a bed. If he sees you hide, he'll find
-  you. Friends can help you up if you get caught. If everyone is caught, you can try
+  you. You can only stay under the bed for 30 seconds, then you have to wait 45 seconds
+  before hiding there again. Friends can help you up if you get caught. If everyone is caught, you can try
   that night again.
 
 ## Notes

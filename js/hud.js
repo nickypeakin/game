@@ -168,7 +168,12 @@ function drawHUD(g, S, me, G, t) {
     g.fillStyle = "#ffca28"; g.fillRect(W / 2 - 118, H - 76, 236 * Math.min(1, me.act.t / me.act.dur), 12);
     if (me.act.dur > 1) txt(g, "walk away to stop", W / 2, H - 50, { size: 11, align: "center", color: "#aaa" });
   }
-  if (me.hidden) txt(g, "You are hiding. Press E to come out.", W / 2, H - 140, { size: 16, align: "center", color: "#90caf9" });
+  if (me.hidden) {
+    if (tileAt(Math.floor(me.hideX), Math.floor(me.hideY)) === "b") {
+      const left = Math.max(0, Math.ceil(BED_HIDE_MAX - (me.hideT || 0)));
+      txt(g, "Under the bed: " + left + "s before you have to come out. Press E to come out.", W / 2, H - 140, { size: 16, align: "center", color: left <= 5 ? "#ff8a80" : "#90caf9", maxW: W - 32 });
+    } else txt(g, "You are hiding. Press E to come out.", W / 2, H - 140, { size: 16, align: "center", color: "#90caf9" });
+  }
   if (me.down) {
     txt(g, "YOU WERE CAUGHT", W / 2, H / 2 - 20, { size: 34, align: "center", color: "#ff1744" });
     txt(g, "A friend can help you up — press E next to you", W / 2, H / 2 + 14, { size: 16, align: "center", maxW: W - 32 });
