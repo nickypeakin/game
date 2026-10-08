@@ -17,6 +17,22 @@ const PEER_OPTS = {
     sdpSemantics: "unified-plan",
   },
 };
+// Optional TURN relay on port 443, for networks that block direct connections
+// between computers (school Wi-Fi). Free account at metered.ca → TURN Server:
+// put the app name (the part before .metered.live) and the API key here.
+const TURN_RELAY = { app: "", apiKey: "" };
+let relayServers = [];
+function loadRelay() {
+  if (!TURN_RELAY.app || !TURN_RELAY.apiKey || typeof fetch !== "function") return;
+  fetch("https://" + TURN_RELAY.app + ".metered.live/api/v1/turn/credentials?apiKey=" + encodeURIComponent(TURN_RELAY.apiKey))
+    .then((r) => (r.ok ? r.json() : []))
+    .then((list) => { if (Array.isArray(list)) relayServers = list.filter((x) => x && x.urls); })
+    .catch(() => {});
+}
+function peerOpts() {
+  if (!relayServers.length) return PEER_OPTS;
+  return Object.assign({}, PEER_OPTS, { config: Object.assign({}, PEER_OPTS.config, { iceServers: PEER_OPTS.config.iceServers.concat(relayServers) }) });
+}
 const BLOCKED_TIP = "School and some home Wi-Fi block online games. Try a phone hotspot or another Wi-Fi, or play Solo.";
 const $ = (id) => document.getElementById(id);
 
@@ -94,7 +110,7 @@ function hostGame(online, retry) {
   if (typeof Peer === "undefined") { status("Couldn't load the multiplayer library. Reload the page, or play Solo.", true); return; }
   status("Connecting to the game server...");
   const code = genCode();
-  const peer = new Peer(PEER_PREFIX + code, PEER_OPTS);
+  const peer = new Peer(PEER_PREFIX + code, peerOpts());
   NET.peer = peer;
   const openT = setTimeout(() => {
     if (NET.peer === peer && G.phase === "menu") status("Couldn't reach the game server. " + BLOCKED_TIP, true);
@@ -185,7 +201,7 @@ function joinGame() {
   if (typeof Peer === "undefined") { status("Couldn't load the multiplayer library. Reload the page, or play Solo.", true); return; }
   dropPeer();
   status("Connecting to the game server...");
-  const peer = new Peer(PEER_OPTS);
+  const peer = new Peer(peerOpts());
   NET.peer = peer;
   let step = "server";
   const fail = () => {
@@ -579,6 +595,7 @@ function boot(saved) {
       $("soloNote").classList.remove("hidden");
     }
   } else {
+    loadRelay();
     try {
       const j = new URLSearchParams(location.search).get("join");
       if (j) $("code").value = j.toUpperCase().slice(0, 4);
