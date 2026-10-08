@@ -59,11 +59,13 @@ save. After a minute the game is live at `https://<your-username>.github.io/<rep
 
 - Multiplayer is peer-to-peer (WebRTC via [PeerJS](https://peerjs.com/)). The host's
   browser runs the game, so the host should keep their tab open and in front.
-- Some school networks block peer-to-peer connections. If joining never connects, try
-  a different network (like a phone hotspot) or play Solo.
+- Some school networks block peer-to-peer connections. When joining fails, the menu says
+  which step failed: reaching the game server, finding the room, or connecting to the
+  host's computer. Try a different network (like a phone hotspot) or play Solo.
 - Play with headphones. All sounds are generated in the browser.
-- The 3D graphics use [Three.js](https://threejs.org/) (loaded from cdnjs). If the game
-  runs slowly, it automatically lowers the resolution.
+- The 3D graphics use [Three.js](https://threejs.org/). Three.js and PeerJS are copied into
+  `lib/` so the game doesn't depend on outside code sites (school filters often block
+  them). If the game runs slowly, it automatically lowers the resolution.
 
 ## Files
 
@@ -74,5 +76,6 @@ save. After a minute the game is live at `https://<your-username>.github.io/<rep
 - `js/hud.js`: the on-screen clock, minimap, prompts and messages
 - `js/audio.js`: sound effects
 - `js/main.js`: menus, input, networking and the main loop
+- `lib/`: copies of Three.js r128 and PeerJS 1.5.4 (MIT licensed)
 - `tools/build-single-file.js`: bundles everything into one HTML file (used for the
   solo version on claude.ai)

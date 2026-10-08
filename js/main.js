@@ -2,6 +2,22 @@
 // Menus, input, networking (PeerJS / WebRTC) and the main loop.
 // ---------------------------------------------------------------------------
 const PEER_PREFIX = "until6am-room-";
+// STUN finds a direct route between two computers; TURN relays the game when
+// a network blocks direct connections (the TCP entries help on strict school Wi-Fi).
+const PEER_OPTS = {
+  debug: 0,
+  config: {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      {
+        urls: ["turn:eu-0.turn.peerjs.com:3478", "turn:us-0.turn.peerjs.com:3478", "turn:eu-0.turn.peerjs.com:3478?transport=tcp", "turn:us-0.turn.peerjs.com:3478?transport=tcp"],
+        username: "peerjs", credential: "peerjsp",
+      },
+    ],
+    sdpSemantics: "unified-plan",
+  },
+};
+const BLOCKED_TIP = "School and some home Wi-Fi block online games. Try a phone hotspot or another Wi-Fi, or play Solo.";
 const $ = (id) => document.getElementById(id);
 
 const G = {
@@ -75,25 +91,37 @@ function hostGame(online, retry) {
   G.role = "host"; G.myId = "host"; G.code = "";
   G.lobby = [{ id: "host", name: G.name, color: COLORS[0] }];
   if (!online) { G.phase = "lobby"; startNight(); return; }
-  if (typeof Peer === "undefined") { status("Couldn't load the multiplayer library (no internet?). Try Solo.", true); return; }
-  status("Creating a room...");
+  if (typeof Peer === "undefined") { status("Couldn't load the multiplayer library. Reload the page, or play Solo.", true); return; }
+  status("Connecting to the game server...");
   const code = genCode();
-  const peer = new Peer(PEER_PREFIX + code, { debug: 0 });
+  const peer = new Peer(PEER_PREFIX + code, PEER_OPTS);
   NET.peer = peer;
+  const openT = setTimeout(() => {
+    if (NET.peer === peer && G.phase === "menu") status("Couldn't reach the game server. " + BLOCKED_TIP, true);
+  }, 12000);
   peer.on("open", () => {
+    clearTimeout(openT);
     if (NET.peer !== peer) return;
     G.code = code; G.phase = "lobby"; status("");
+    $("lobbyNote").textContent = "";
     renderLobby(); show("lobby");
   });
   peer.on("connection", (conn) => {
     conn.on("data", (m) => hostOnData(conn, m));
     conn.on("close", () => hostDrop(conn.peer));
     conn.on("error", () => hostDrop(conn.peer));
+    // tell the host when a friend found the room but couldn't get through
+    const blocked = () => {
+      if (NET.peer !== peer || conn.open || G.phase !== "lobby") return;
+      $("lobbyNote").textContent = "Someone tried to join, but the network blocked the connection. " + BLOCKED_TIP;
+    };
+    watchIce(conn, blocked);
+    setTimeout(blocked, 20000);
   });
   peer.on("error", (err) => {
     if (NET.peer !== peer) return;
     if (err.type === "unavailable-id") { hostGame(true, true); return; }
-    if (G.phase === "menu") status(netErrorText(err) + " Try again or play Solo.", true);
+    if (G.phase === "menu") { clearTimeout(openT); status(netErrorText(err) + " " + BLOCKED_TIP, true); }
     else addMsg("Network hiccup: " + err.type, "#ff8a80");
   });
   peer.on("disconnected", () => { if (NET.peer === peer && !peer.destroyed) { try { peer.reconnect(); } catch (e) {} } });
@@ -138,27 +166,45 @@ function broadcastLobby(back) {
 
 function netErrorText(err) {
   const t = err && err.type;
-  if (t === "network" || t === "server-error" || t === "socket-error" || t === "socket-closed") return "Couldn't reach the game server (this network may block it).";
+  if (t === "network" || t === "server-error" || t === "socket-error" || t === "socket-closed") return "Couldn't reach the game server.";
   if (t === "browser-incompatible") return "This browser can't do online play.";
   return "Network error: " + t + ".";
+}
+
+// calls fail() if the browsers can't find any route to each other
+function watchIce(conn, fail) {
+  const pc = conn.peerConnection;
+  if (!pc) return;
+  pc.addEventListener("iceconnectionstatechange", () => { if (pc.iceConnectionState === "failed") fail(); });
 }
 
 function joinGame() {
   readName(); SFX.init();
   const code = typedCode();
   if (code.length !== 4) { status("Type the 4-letter code from your friend's lobby screen, then press Join.", true); return; }
-  if (typeof Peer === "undefined") { status("Couldn't load the multiplayer library (no internet?).", true); return; }
+  if (typeof Peer === "undefined") { status("Couldn't load the multiplayer library. Reload the page, or play Solo.", true); return; }
   dropPeer();
-  status("Connecting to room " + code + "...");
-  const peer = new Peer({ debug: 0 });
+  status("Connecting to the game server...");
+  const peer = new Peer(PEER_OPTS);
   NET.peer = peer;
-  const timeout = setTimeout(() => {
-    if (NET.peer === peer && G.phase === "menu") status("Couldn't connect to room " + code + ". Check the code, and that your friend is still on the lobby screen. If it keeps failing, this network may be blocking online play.", true);
-  }, 15000);
+  let step = "server";
+  const fail = () => {
+    if (NET.peer !== peer || G.phase !== "menu" || step === "done") return;
+    clearTimeout(timeout);
+    if (step === "server") status("Couldn't reach the game server. " + BLOCKED_TIP, true);
+    else status("Found room " + code + ", but couldn't connect to your friend's computer. " + BLOCKED_TIP, true);
+  };
+  const timeout = setTimeout(fail, 20000);
   peer.on("open", () => {
     if (NET.peer !== peer) return;
+    step = "room";
+    status("Looking for room " + code + "...");
     const conn = peer.connect(PEER_PREFIX + code, { reliable: true, serialization: "json" });
     NET.host = conn;
+    // no "room not found" within a few seconds means the room is there
+    setTimeout(() => { if (NET.peer === peer && step === "room" && G.phase === "menu") { step = "link"; status("Found room " + code + ". Connecting to your friend's computer..."); } }, 3000);
+    watchIce(conn, () => { step = "link"; fail(); });
+    conn.on("error", () => { step = "link"; fail(); });
     conn.on("open", () => conn.send({ t: "hello", name: G.name }));
     conn.on("data", (m) => { clearTimeout(timeout); clientOnData(m); });
     conn.on("close", () => {
@@ -166,10 +212,11 @@ function joinGame() {
     });
   });
   peer.on("error", (err) => {
-    if (NET.peer !== peer) return;
+    if (NET.peer !== peer || step === "done") return;
+    step = "done";
     clearTimeout(timeout);
     if (err.type === "peer-unavailable") status("No game found with code " + code + ". Check the code with your friend: they press Host a Game and read you the code on their screen.", true);
-    else status(netErrorText(err), true);
+    else status(netErrorText(err) + " " + BLOCKED_TIP, true);
   });
 }
 

@@ -27,7 +27,16 @@ const inlineJs = (src) => {
   return "<script>\n" + code + "\n</script>";
 };
 
-if (solo) body = body.replace(/\s*<script src="https:\/\/unpkg\.com\/peerjs[^"]*"><\/script>/, "");
+// the page loads vendored copies; the single file points at the same versions on CDNs
+const CDN = {
+  "lib/three.min.js": "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js",
+  "lib/peerjs.min.js": "https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js",
+};
+if (solo) body = body.replace(/\s*<script src="lib\/peerjs\.min\.js"><\/script>/, "");
+body = body.replace(/<script src="(lib\/[\w.-]+\.js)"><\/script>/g, (_, src) => {
+  if (!CDN[src]) throw new Error("no CDN copy known for " + src);
+  return '<script src="' + CDN[src] + '"></script>';
+});
 body = body.replace(/<script src="(js\/[\w.-]+\.js)"><\/script>/g, (_, src) => inlineJs(src));
 if (/<script src=/.test(body.replace(/<script src="https:\/\/(unpkg\.com|cdnjs\.cloudflare\.com)\/[^"]+"><\/script>/g, ""))) {
   throw new Error("unexpected external script left in page");
