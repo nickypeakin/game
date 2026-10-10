@@ -22,7 +22,9 @@ const title = (html.match(/<title>[\s\S]*?<\/title>/) || ["<title>Until 6 AM</ti
 let body = html.match(/<body>([\s\S]*)<\/body>/)[1];
 
 const inlineJs = (src) => {
-  const code = fs.readFileSync(path.join(root, src), "utf8");
+  let code = fs.readFileSync(path.join(root, src), "utf8");
+  // solo pages never go online, so they don't carry the relay login
+  if (solo) code = code.replace(/username: "[^"]*",(\s*)credential: "[^"]*",/g, 'username: "",$1credential: "",');
   if (/<\/script/i.test(code)) throw new Error(src + " contains </script");
   return "<script>\n" + code + "\n</script>";
 };
