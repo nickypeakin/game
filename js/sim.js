@@ -370,7 +370,7 @@ function setupEvening(S) {
   S.stage = "evening"; S.mins = 0; S.stageT = 0;
   S.power = true; S.flick = 0; S.tv = false; S.phone = 0; S.phoneMsg = null;
   S.entries = ENTRIES.map((E) => ({ boards: 0, bhp: 100, lock: E.kind === "door" ? 100 : 55, broken: false, hit: 0, open: false, locked: false }));
-  S.idoors = IDOORS.map(() => ({ open: true }));
+  S.idoors = IDOORS.map(() => ({ open: false }));
   S.rooms = {};
   ROOMS.forEach((r) => (S.rooms[r.id] = { on: true, bulb: true }));
   if (S.night === 2) S.rooms.bath.bulb = false;
@@ -398,6 +398,9 @@ function startNightStage(S) {
   const cfg = NIGHTS[S.night];
   S.stage = "night"; S.stageT = 0; S.mins = cfg.wake;
   for (const id in S.rooms) S.rooms[id].on = false;
+  // you wake up with every door shut
+  S.idoors.forEach((d) => (d.open = false));
+  S.entries.forEach((e, i) => { if (ENTRIES[i].kind === "door" && !e.broken) e.open = false; });
   S.tv = false; S.micro = { st: "off", t: 0 }; S.phone = 0;
   if (S.night === 2) S.power = false;
   S.closet.planks += cfg.nightPlanks;
