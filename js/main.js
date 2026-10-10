@@ -40,6 +40,8 @@ const G = {
   stam: 100, msgs: [], notes: [], call: null, banner: null, prompt: null,
   scare: 0, shakeX: 0, shakeY: 0, shake: 0, dread: 0, phantom: null,
   stingerCD: 0, stepDist: 0, plock: false, simTimer: null, sendT: 0,
+  model: "f",          // the character you picked: "f" or "m"
+  readClip: false, watchT: 0, watchMax: 3, keypad: null, phone: null, lid: 0, hitFx: 0, showMap: false,
 };
 const NET = { peer: null, conns: {}, host: null };
 
@@ -54,6 +56,14 @@ function readName() {
   G.name = cleanName($("name").value);
   try { localStorage.setItem("until6am-name", G.name); } catch (e) {}
 }
+// which character you play: picked on the menu
+function setModel(m) {
+  G.model = m === "m" ? "m" : "f";
+  $("pickF").classList.toggle("on", G.model === "f");
+  $("pickM").classList.toggle("on", G.model === "m");
+  try { localStorage.setItem("curfew-model", G.model); } catch (e) {}
+}
+const MODEL_NAMES = { f: "Female", m: "Male" };
 
 function renderLobby() {
   $("lobbyCode").textContent = G.code || "SOLO";
@@ -63,7 +73,7 @@ function renderLobby() {
   for (const p of G.lobby) {
     const li = document.createElement("li");
     li.innerHTML = `<span class="dot" style="background:${p.color}"></span>`;
-    li.appendChild(document.createTextNode(p.name + (p.id === G.myId ? " (you)" : "") + (p.id === "host" ? " — host" : "")));
+    li.appendChild(document.createTextNode(p.name + " · " + (MODEL_NAMES[p.model] || "Female") + (p.id === G.myId ? " (you)" : "") + (p.id === "host" ? " — host" : "")));
     ul.appendChild(li);
   }
   $("btnStart").classList.toggle("hidden", G.role !== "host");
@@ -97,7 +107,7 @@ function hostGame(online, retry) {
   readName(); SFX.init();
   dropPeer();
   G.role = "host"; G.myId = "host"; G.code = "";
-  G.lobby = [{ id: "host", name: G.name, color: COLORS[0] }];
+  G.lobby = [{ id: "host", name: G.name, color: COLORS[0], model: G.model }];
   if (!online) { G.phase = "lobby"; startNight(); return; }
   if (typeof Peer === "undefined") { status("Couldn't load the multiplayer library. Reload the page, or play Solo.", true); return; }
   status("Connecting to the game server...");
@@ -144,7 +154,7 @@ function hostOnData(conn, m) {
     const used = new Set(G.lobby.map((p) => p.color));
     const color = COLORS.find((c) => !used.has(c)) || COLORS[0];
     G.lobby = G.lobby.filter((p) => p.id !== conn.peer);
-    G.lobby.push({ id: conn.peer, name: cleanName(m.name), color });
+    G.lobby.push({ id: conn.peer, name: cleanName(m.name), color, model: m.model === "m" ? "m" : "f" });
     conn.send({ t: "welcome", id: conn.peer, code: G.code });
     broadcastLobby();
   } else if (m.t === "in" && NET.conns[conn.peer]) {
@@ -213,7 +223,7 @@ function joinGame() {
     setTimeout(() => { if (NET.peer === peer && step === "room" && G.phase === "menu") { step = "link"; status("Found room " + code + ". Connecting to your friend's computer..."); } }, 3000);
     watchIce(conn, () => { step = "link"; fail(); });
     conn.on("error", () => { step = "link"; fail(); });
-    conn.on("open", () => conn.send({ t: "hello", name: G.name }));
+    conn.on("open", () => conn.send({ t: "hello", name: G.name, model: G.model }));
     conn.on("data", (m) => { clearTimeout(timeout); clientOnData(m); });
     conn.on("close", () => {
       if (NET.peer === peer && G.phase !== "menu") { leaveToMenu(); status("The host left the game.", true); }
@@ -272,9 +282,9 @@ function hostEmit(e) {
 }
 setEmitter(hostEmit);
 
-function startNight(resumeS, night) {
+function startNight(resumeS) {
   G.inputs = {};
-  G.S = resumeS || newGame(G.lobby, night || 1);
+  G.S = resumeS || newGame(G.lobby);
   broadcast({ t: "start" });
   enterPlay(!!resumeS);
   let last = performance.now(), tick = 0;
@@ -294,6 +304,7 @@ function enterPlay(resumed) {
   G.phase = "play";
   show(null);
   G.mySnap = -1; G.rpos = {}; G.msgs = []; G.notes = []; G.call = null; G.card = null; G.scare = 0; G.stam = 100;
+  G.readClip = false; G.watchT = 0; G.keypad = null; G.phone = null; G.lid = 0; G.hitFx = 0; G.me.fl = true; G.wasHidden = false;
   G.stR = G.S ? { x: G.S.stalker.x, y: G.S.stalker.y, a: G.S.stalker.a } : { x: -30, y: -30, a: 0 };
   G.lastStage = null;
   if (resumed) addMsg("The game was updated. Your night continues.", "#b0bec5");
@@ -311,14 +322,14 @@ function showEnd(result) {
     if (G.phase !== "end") return;
     show("end");
     const win = result === "win";
-    const night = G.S ? G.S.night : 1;
-    G.endNight = night;
-    $("endTitle").textContent = win ? "THE END" : "HE GOT YOU";
-    $("endTitle").style.color = win ? "#ffd180" : "#ff1744";
+    const S = G.S, me = S && S.players[G.myId];
+    const out = S ? Object.values(S.players).filter((p) => p.escaped).map((p) => p.name) : [];
+    $("endTitle").textContent = win ? (me && me.escaped ? "YOU GOT OUT" : "THEY GOT OUT") : "HE GOT YOU";
+    $("endTitle").style.color = win ? "#a5d6a7" : "#ff1744";
     $("endText").textContent = win
-      ? "You made it through all three nights in Apartment 302. Aunt May is home. You're never apartment-sitting again."
-      : "Night " + night + ". It was " + clockText(G.S ? G.S.mins : 0) + " when the last of you went quiet.";
-    $("btnAgain").textContent = win ? (NET.peer ? "Back to Lobby" : "Play Again") : "Try Night " + night + " Again";
+      ? (out.length > 1 ? out.join(", ") + " made it out of Apartment 302" : "You made it out of Apartment 302") + " at " + clockText(S ? S.mins : 0) + ". Behind you, something laughs inside the walls."
+      : (S && S.mins >= NIGHT_MINS ? "6:00 AM. Curfew's over, and you never made it out." : "It was " + clockText(S ? S.mins : 0) + " when the last of you went quiet.");
+    $("btnAgain").textContent = NET.peer ? "Back to Lobby" : "Play Again";
     $("btnAgain").classList.toggle("hidden", G.role !== "host");
     $("endWait").classList.toggle("hidden", G.role === "host");
   }, result === "win" ? 1200 : 2200);
@@ -326,9 +337,7 @@ function showEnd(result) {
 
 function backToLobby() {
   if (G.simTimer) { clearInterval(G.simTimer); G.simTimer = null; }
-  const retry = G.S && G.S.phase === "lose" ? G.S.night : 0;
   G.S = null;
-  if (retry) { startNight(null, retry); return; } // try the same night again
   if (!NET.peer) { startNight(); return; } // solo: straight into a new game
   G.phase = "lobby";
   renderLobby(); show("lobby");
@@ -367,7 +376,34 @@ function onEvent(e) {
       break;
     case "steps": SFX.play("steps", 0.5, panFor(e.x, e.y)); addMsg("Footsteps... from the apartment upstairs?", "#bcaaa4"); break;
     case "msg": addMsg(e.text, e.c, e.big); break;
-    case "text": SFX.play("buzz", 0.7); G.notes.push({ from: "Unknown", text: e.text, t: 0 }); break;
+    case "text": {
+      // your phone comes out by itself (the flashlight goes in your pocket)
+      SFX.play("buzz", 0.7);
+      const thread = G.phone ? G.phone.thread : (G.thread || (G.thread = []));
+      thread.push({ text: e.text, me: false });
+      if (thread.length > 12) thread.shift();
+      G.phone = { thread, opts: e.opts || null, t: G.phone ? Math.min(G.phone.t, 0.3) : 0, dur: e.opts ? 15 : 4.5 };
+      break;
+    }
+    case "keypad": G.keypad = { digits: "", bad: 0 }; SFX.play("click", 0.5); break;
+    case "safe": posPlay("safe", e.x, e.y, 1.1); G.keypad = null; break;
+    case "safeNo": SFX.play("buzz", 0.9); if (G.keypad) { G.keypad.bad = 1.2; G.keypad.digits = ""; } break;
+    case "hit":
+      if (e.id === G.myId) { G.scare = 0.7; G.hitFx = 1; G.shake = Math.max(G.shake, 14); SFX.play("scream", 1.1); SFX.play("bang", 0.9); G.readClip = false; G.keypad = null; }
+      else { posPlay("scream", e.x, e.y, 0.8); addMsg(e.name + " got hit!", "#ff8a80"); }
+      break;
+    case "drag": if (e.id === G.myId) { G.scare = 1.4; SFX.play("scream", 1.2); G.readClip = false; G.keypad = null; G.phone = null; } break;
+    case "tvScene": if (e.id === G.myId) { G.me.a = -Math.PI / 2; G.me.pitch = 0; } break;
+    case "knockout": if (e.id === G.myId) SFX.play("bang", 1.2); else addMsg("You hear a heavy thud from the living room...", "#ff8a80"); break;
+    case "carry": break;
+    case "reset": G.readClip = false; G.keypad = null; G.phone = null; G.thread = []; G.me.pitch = 0; break;
+    case "curfew": SFX.play("chime", 0.9); SFX.play("chime", 0.8, 0, 0.6); SFX.play("chime", 0.7, 0, 1.2); SFX.play("powerout", 0.6, 0, 0.3); break;
+    case "note": SFX.play("tick", 0.9); break;
+    case "escaped":
+      if (e.id === G.myId) { SFX.play("win", 1); G.readClip = false; }
+      else addMsg(e.name + " got out!", "#a5d6a7", true);
+      break;
+    case "scream": posPlay("scream", e.x, e.y, 1.2); G.shake = Math.max(G.shake, 6); break;
     case "call":
       G.call = { text: e.text, t: 0, dur: 4 + e.text.length * 0.07 };
       SFX.play("pickup", 0.9); SFX.play("breath", 0.8, 0, 0.4); SFX.play("voice", 0.7, 0, 1.4);
@@ -388,10 +424,6 @@ function onEvent(e) {
     case "flicker": SFX.play("flicker", 0.6); break;
     case "dog": SFX.play("dog", 0.25, rand(-1, 1)); break;
     case "stinger": SFX.play("stinger", 0.8); break;
-    case "caught":
-      if (e.id === G.myId) { G.scare = 1.4; SFX.play("scream", 1.2); }
-      else { posPlay("scream", e.x, e.y, 0.8); addMsg(e.name + " WAS CAUGHT! Go help them up!", "#ff1744", true); }
-      break;
     case "card": G.card = { title: e.title, lines: e.lines, t: e.t || 6, dur: e.t || 6 }; break;
     case "task": SFX.play("tick", 0.7); addMsg("✓ Done: " + e.text, "#a5d6a7"); break;
     case "creak": posPlay(e.heavy ? "creakHeavy" : e.soft ? "creakSoft" : "creak", e.x, e.y, e.slow ? 1.3 : 1); break;
@@ -403,7 +435,7 @@ function onEvent(e) {
     case "wake": SFX.play("chime", 0.5); break;
     case "morning": SFX.play("win", 0.8); break;
     case "win": SFX.play("win", 1); break;
-    case "lose": break;
+    case "lose": SFX.play("stinger", 1); break;
   }
 }
 
@@ -413,14 +445,40 @@ const LOOK_SENS = 0.0026;
 let mouseDown = false, dragging = false, dragDist = 0, lookDX = 0, lookDY = 0;
 // a tap is counted, not held: the host acts when the count changes
 G.pressE = 0; G.pressQ = 0; G.pressG = 0;
+G.pressR = 0; G.pressRp = 0; G.replyC = 0; G.pressSc = 0; G.safeV = "";
 addEventListener("keydown", (e) => {
   if (G.phase !== "play" && G.phase !== "end") return;
-  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Backspace"].includes(e.code)) e.preventDefault();
+  // the safe's keypad takes over the keyboard while it's open
+  if (G.keypad) {
+    if (!e.repeat) {
+      const m = /^(?:Digit|Numpad)(\d)$/.exec(e.code);
+      if (m && G.keypad.digits.length < 4) {
+        G.keypad.digits += m[1]; SFX.play("click", 0.35);
+        if (G.keypad.digits.length === 4) { G.safeV = G.keypad.digits; G.pressSc++; }
+      } else if (e.code === "Backspace") G.keypad.digits = G.keypad.digits.slice(0, -1);
+      else if (e.code === "Escape" || e.code === "KeyE") G.keypad = null;
+    }
+    return;
+  }
   if (!e.repeat) {
-    if (e.code === "KeyF") { G.me.fl = !G.me.fl; SFX.play("click", 0.4); }
-    if (e.code === "KeyE" || e.code === "Space") G.pressE++;
+    if (e.code === "KeyF") { if (!G.phone) { G.me.fl = !G.me.fl; SFX.play("click", 0.4); } }
+    if (e.code === "KeyE" || e.code === "Space") { if (G.readClip) G.readClip = false; else G.pressE++; }
     if (e.code === "KeyQ") G.pressQ++;
-    if (e.code === "KeyG") G.pressG++;
+    if (e.code === "KeyG") { G.readClip = false; G.pressG++; }
+    if (e.code === "KeyR") G.pressR++;
+    if (e.code === "KeyT") { G.watchMax = 3.2; G.watchT = G.watchT > 0.4 ? Math.max(G.watchT, 0.25) : G.watchMax; SFX.play("rustle", 0.15); }
+    if (e.code === "KeyC") { const sp = G.S && G.S.players[G.myId]; if (sp && sp.carry === "clipboard") { G.readClip = !G.readClip; SFX.play("rustle", 0.3); } }
+    if (e.code === "KeyM") G.showMap = !G.showMap;
+    if (e.code === "Escape") G.readClip = false;
+    // text him back
+    if ((e.code === "Digit1" || e.code === "Digit2" || e.code === "Numpad1" || e.code === "Numpad2") && G.phone && G.phone.opts) {
+      const i = e.code.endsWith("2") ? 1 : 0;
+      G.replyC = i; G.pressRp++;
+      G.phone.thread.push({ text: G.phone.opts[i], me: true });
+      G.phone.opts = null; G.phone.dur = G.phone.t + 3.5;
+      SFX.play("tick", 0.4);
+    }
   }
   keys[e.code] = true;
 });
@@ -467,19 +525,33 @@ addEventListener("mouseup", () => {
 });
 
 function myInput() {
-  return { t: "in", x: G.me.x, y: G.me.y, a: G.me.a, pt: G.me.pitch, fl: G.me.fl, ep: G.pressE, qp: G.pressQ, gp: G.pressG };
+  return {
+    t: "in", x: G.me.x, y: G.me.y, a: G.me.a, pt: G.me.pitch, fl: G.me.fl, ph: !!G.phone, sp: !!G.sprinting,
+    ep: G.pressE, qp: G.pressQ, gp: G.pressG, rl: G.pressR, rp: G.pressRp, rc: G.replyC, sc: G.pressSc, sv: G.safeV,
+  };
 }
 
 function updateLocal(dt, now) {
   const S = G.S, p = S && S.players[G.myId];
   if (!p || S.phase !== "play" || G.phase !== "play") return;
-  if (S.stage === "sleep") { lookDX = lookDY = 0; return; }
+  G.sprinting = false;
+  if (p.escaped || p.down) { lookDX = lookDY = 0; return; }
+  // getting into bed: face along it, ready to look up at the ceiling
+  if (p.hidden === "bed" && !G.wasHidden) { const bs = BED_SPOTS[p.bedSpot]; if (bs) G.me.a = bs.a; G.me.pitch = 0.25; }
+  G.wasHidden = p.hidden;
+  if (G.keypad) { lookDX = lookDY = 0; return; }
   // looking around
   G.me.a += lookDX * LOOK_SENS;
-  G.me.pitch = clamp((G.me.pitch || 0) - lookDY * LOOK_SENS, -1.3, 1.3);
+  G.me.pitch = clamp((G.me.pitch || 0) - lookDY * LOOK_SENS, -1.3, p.hidden === "bed" ? 1.45 : 1.3);
   lookDX = lookDY = 0;
   if (keys.ArrowLeft) G.me.a -= dt * 2.4;
   if (keys.ArrowRight) G.me.a += dt * 2.4;
+  if (p.hidden === "bed") G.me.pitch = Math.max(G.me.pitch, -0.35);
+  // on the couch with him behind you, you can only turn so far
+  if (S.cut && S.cut.id === G.myId) {
+    if (S.cut.ph === "tv") { G.me.a = -Math.PI / 2 + clamp(angDiff(G.me.a, -Math.PI / 2), -2.5, 2.5); G.me.pitch = clamp(G.me.pitch, -0.5, 0.5); }
+    return;
+  }
   G.me.a = Math.atan2(Math.sin(G.me.a), Math.cos(G.me.a));
   // walking: forward/back along where you look, A/D strafe
   let fw = 0, st = 0;
@@ -489,12 +561,15 @@ function updateLocal(dt, now) {
   if (keys.KeyA) st -= 1;
   const ca = Math.cos(G.me.a), sa = Math.sin(G.me.a);
   const mx = fw * ca - st * sa, my = fw * sa + st * ca;
-  const moving = (fw || st) && !p.down && !p.hidden;
+  const eating = p.act && p.act.kind === "eat";
+  const moving = (fw || st) && !p.hidden && !(p.stun > 0) && !eating;
   const sprint = moving && (keys.ShiftLeft || keys.ShiftRight) && G.stam > 1;
-  if (sprint) G.stam = Math.max(0, G.stam - dt * 28);
+  if (sprint) G.stam = Math.max(0, G.stam - dt * 22);
   else G.stam = Math.min(100, G.stam + dt * (moving ? 10 : 18));
+  G.sprinting = sprint;
   if (moving) {
-    const l = Math.hypot(mx, my), spd = (sprint ? SPRINT : WALK) * (p.planks > 0 ? 0.9 : 1);
+    // every hit slows you down a little, for good
+    const l = Math.hypot(mx, my), spd = (sprint ? SPRINT : WALK) * (p.spd || 1);
     const ox = G.me.x, oy = G.me.y;
     moveCircle(G.me, mx / l * spd * dt, my / l * spd * dt, PR, playerSolidFn(S));
     const stepped = Math.hypot(G.me.x - ox, G.me.y - oy);
@@ -503,6 +578,7 @@ function updateLocal(dt, now) {
     if (G.stepDist > (sprint ? 1.1 : 0.85)) { G.stepDist = 0; SFX.play("step", sprint ? 0.35 : 0.18, 0); }
   }
   G.bob = Math.sin(G.bobPhase || 0) * (moving ? (sprint ? 0.05 : 0.03) : 0);
+  G.moving = moving ? (sprint ? 2 : 1) : 0;
 }
 
 // ------------------------------ main loop ----------------------------------
@@ -519,8 +595,8 @@ function frame(nowMs) {
     tickEffects(dt, now);
     const S = G.S, sp = S.players[G.myId];
     if (sp && sp.snap !== G.mySnap) { G.me.x = sp.x; G.me.y = sp.y; G.mySnap = sp.snap; }
-    const me = Object.assign({}, sp || { id: G.myId, name: G.name, color: "#fff", bat: 0, planks: 0 }, { x: G.me.x, y: G.me.y, a: G.me.a, pitch: G.me.pitch || 0, fl: G.me.fl });
-    G.prompt = sp && !sp.down && !sp.hidden ? findTarget(S, me) : null;
+    const me = Object.assign({}, sp || { id: G.myId, name: G.name, color: "#fff", bat: 0 }, { x: G.me.x, y: G.me.y, a: G.me.a, pitch: G.me.pitch || 0, pt: G.me.pitch || 0, fl: G.me.fl, ph: !!G.phone });
+    G.prompt = sp && !G.keypad ? findTarget(S, me) : null;
     renderGame(S, me, G, now, rawDt);
   } else {
     renderMenu(now, rawDt);
@@ -545,12 +621,16 @@ function tickEffects(dt, now) {
   if (G.notes.length) { G.notes[0].t += dt; if (G.notes[0].t > 6) G.notes.shift(); }
   if (G.call && (G.call.t += dt) > G.call.dur) G.call = null;
   if (G.card && (G.card.t -= dt) <= 0) G.card = null;
-  // flashlight off for the cosy evening, on when something wakes you
-  if (S.stage !== G.lastStage) {
-    if (S.stage === "evening") G.me.fl = false;
-    if (S.stage === "night") G.me.fl = true;
-    G.lastStage = S.stage;
-  }
+  // the phone goes back in your pocket once you've read it
+  if (G.phone && (G.phone.t += dt) > G.phone.dur) G.phone = null;
+  if (G.watchT > 0) G.watchT = Math.max(0, G.watchT - dt);
+  if (G.keypad && G.keypad.bad > 0) G.keypad.bad = Math.max(0, G.keypad.bad - dt);
+  G.hitFx = Math.max(0, G.hitFx - dt * 1.5);
+  const sp = S.players[G.myId];
+  if (G.readClip && (!sp || sp.carry !== "clipboard")) G.readClip = false;
+  // eyelids shut when you look up at the ceiling in bed
+  const shut = sp && sp.hidden === "bed" && (G.me.pitch || 0) > 0.9 ? 1 : 0;
+  G.lid += (shut - G.lid) * Math.min(1, dt * 7);
   if (G.phantom && (G.phantom.t -= dt) <= 0) G.phantom = null;
   G.scare = Math.max(0, G.scare - dt);
   G.shake = Math.max(0, G.shake - dt * 25);
@@ -580,6 +660,11 @@ const SOLO_ONLY = !!window.SOLO_ONLY;
 function boot(saved) {
   initRender();
   try { $("name").value = localStorage.getItem("until6am-name") || ""; } catch (e) {}
+  let pickedModel = "f";
+  try { pickedModel = localStorage.getItem("curfew-model") || "f"; } catch (e) {}
+  setModel(pickedModel);
+  $("pickF").onclick = () => setModel("f");
+  $("pickM").onclick = () => setModel("m");
   if (SOLO_ONLY) {
     $("mpControls").classList.add("hidden");
     if (window.MULTIPLAYER_URL) {

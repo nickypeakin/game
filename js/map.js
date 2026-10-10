@@ -1,22 +1,22 @@
 // ---------------------------------------------------------------------------
 // Apartment 302, laid out like Room 302 from Silent Hill 4: The Room.
-// The chained front door opens into one open room: kitchen on the left,
-// living room beyond it, a small laundry room right by the door. A hallway
-// leads back to the bedroom and the bathroom (the one with the hole in the
-// wall). The bedroom and living room each have two windows on the west wall.
-// Each character is one tile (1 metre).
+// The front door (locked; the key is in the laundry room safe) opens into one
+// open room: kitchen on the left, living room beyond it, a small laundry room
+// right by the door. A hallway leads back to the bedroom and the bathroom
+// (the one with the hole in the wall). The back door in the living room goes
+// out to a fenced backyard with the trash can. Each character is one tile (1 metre).
 //
 //  Inside:  .  floor        a  archway       d  room door (opens/closes)
 //           #  wall         W  window        D  front door
 //           b  bed          n  nightstand    C  closet        e  desk
 //           u  bathtub      z  bathroom sink o  toilet
-//           w  washer/dryer L  supply shelf (bulbs, planks)   F  fuse box
+//           w  washer/dryer L  supply shelf (bulbs)  F  fuse box    K  safe
 //           v  TV           H  old chest     c  coffee table  s  red love seat
 //           h  phone (landline)
 //           g  trash can    A  drawer (batteries)   S  kitchen sink
 //           O  stove        M  microwave     r  fridge        T  dining table
-//  Outside: ,  ground       y  courtyard (players may walk here)
-//           f  fence        G  gate          Z  dumpster      X  power breaker
+//  Outside: ,  ground       y  backyard / courtyard (players may walk here)
+//           f  fence        G  gate          Z  outdoor trash can   X  power breaker
 // ---------------------------------------------------------------------------
 const TILE = 32;
 const MAP_W = 30;
@@ -29,16 +29,16 @@ const HOUSE_ROWS = [
   "W....bb#..#,,,,",
   "#......d..#,,,,",
   "W......#..#####",
-  "#.....C#..#ww.#",
+  "#.....C#..#wwK#",
   "########..#...W",
   "#uu..z.#..#...F",
   "#......d..#...#",
   "#o.....#..#..L#",
-  "########aa##d##",
+  "########a###d##",
   "#.vvH.h.......#",
   "W........TT...D",
   "#.cc.....TT...#",
-  "W.ss..........#",
+  "D.ss..........#",
   "#......g.ASOMr#",
   "########W######",
 ];
@@ -53,13 +53,18 @@ for (let y = 0; y < MAP_H; y++) {
   }
   MAP.push(row);
 }
-// a small fenced courtyard outside the front door, with the dumpster and a gate
+// a small fenced courtyard outside the front door: getting out here is how you escape
 for (let y = 14; y <= 21; y++) for (let x = 22; x <= 26; x++) MAP[y][x] = "y";
 for (let x = 22; x <= 27; x++) { MAP[13][x] = "f"; MAP[22][x] = "f"; }
 for (let y = 13; y <= 22; y++) MAP[y][27] = "f";
 MAP[19][27] = "G";
-MAP[15][25] = "Z";
-const BREAKER = { x: 6, y: 15 };
+// the fenced backyard behind the back door, with the trash can
+for (let y = 16; y <= 22; y++) for (let x = 2; x <= 6; x++) MAP[y][x] = "y";
+for (let x = 1; x <= 6; x++) { MAP[15][x] = "f"; MAP[23][x] = "f"; }
+for (let y = 15; y <= 23; y++) MAP[y][1] = "f";
+MAP[19][1] = "G";
+MAP[16][2] = "Z";
+const BREAKER = { x: 6, y: 12 };
 MAP[BREAKER.y][BREAKER.x] = "X";
 
 const HOUSE = { x0: OX, y0: OY, x1: OX + HOUSE_ROWS[0].length - 1, y1: OY + HOUSE_ROWS.length - 1 };
@@ -108,7 +113,7 @@ const ENTRY_NAMES = {
   "7,8": "Bedroom Window",
   "7,10": "Bedroom Corner Window",
   "7,18": "Living Room Window",
-  "7,20": "Living Room Corner Window",
+  "7,20": "Back Door",
   "15,22": "Kitchen Window",
   "21,12": "Laundry Room Window",
   "21,18": "Front Door",
@@ -153,6 +158,9 @@ for (let y = 0; y < MAP_H; y++) {
   }
 }
 const FRONT_DOOR = ENTRY_AT["21,18"];
+const BACK_DOOR = ENTRY_AT["7,20"];
+function inBackyard(x, y) { return tileAt(Math.floor(x), Math.floor(y)) === "y" && x < HOUSE.x0; }
+function inCourtyard(x, y) { return tileAt(Math.floor(x), Math.floor(y)) === "y" && x >= HOUSE.x1 + 1; }
 
 // Fixed spots the game refers to
 const SPOTS = {
@@ -163,12 +171,35 @@ const SPOTS = {
   closet: { x: 13, y: 11 },          // your bedroom closet (laundry goes here)
   hole: { x: 8.01, y: 14.4 },         // the hole in the bathroom wall
   porch: { x: 22.07, y: 17.1 },       // light by the front door
-  yard: { x: 22.07, y: 15.2 },        // motion light over the courtyard
-  watchFence: { x: 28.6, y: 17.5 },   // just past the courtyard fence
+  yard: { x: 6.93, y: 19.5 },         // motion light over the backyard
+  watchYard: { x: 0.5, y: 18.5 },     // just past the backyard fence
   watchStreet: { x: 10.5, y: 24.6 },  // under the streetlight, seen from the living room
-  watchGate: { x: 28.4, y: 19.5 },
   center: { x: 14.5, y: 14.5 },
+  clipboard: { x: 16.5, y: 21.3, h: 0.92 }, // on the counter next to the kitchen sink
+  safe: { x: 20.5, y: 11.5 },
+  holeIn: { x: 8.6, y: 14.4 },        // where he climbs out of the hole
+  couch: { x: 10, y: 20.45 },         // the seat facing the TV
+  behindCouch: { x: 10, y: 21.55 },
+  frontOut: { x: 23.2, y: 18.5 },
 };
+// lying on the bed (two people fit) or on the love seat, under the blanket
+const BED_SPOTS = [
+  { x: 12.5, y: 7.95, a: Math.PI / 2, tile: "12,7" },
+  { x: 13.5, y: 7.95, a: Math.PI / 2, tile: "13,7" },
+  { x: 9.6, y: 20.5, a: 0, tile: "9,20" },
+];
+// where spare flashlight batteries can turn up (h = height of the surface)
+const BATTERY_SPOTS = [
+  { x: 11.3, y: 7.25, h: 0.56 },  // bedroom nightstand
+  { x: 8.45, y: 7.3, h: 0.77 },   // bedroom desk
+  { x: 10.25, y: 19.45, h: 0.44 }, // coffee table
+  { x: 11.35, y: 17.3, h: 0.56 }, // the old chest
+  { x: 16.55, y: 18.55, h: 0.75 }, // kitchen table
+  { x: 18.5, y: 11.5, h: 0.92 },  // on the washer
+  { x: 12.25, y: 13.3, h: 0.91 }, // bathroom sink
+  { x: 20.55, y: 15.45, h: 0.63 }, // laundry shelf
+  { x: 13.6, y: 17.5, h: 0.73 },  // by the landline
+];
 
 // Where everyone wakes up, and where the evening starts
 const WAKE_SPOTS = [L(4, 2), L(3, 3), L(2, 4), L(8, 4), L(9, 6), L(5, 12)].map(([x, y]) => [x + 0.5, y + 0.5]);

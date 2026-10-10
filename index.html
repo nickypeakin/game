@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Until 6 AM</title>
+  <title>Curfew Control</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -12,9 +12,15 @@
 
   <div id="menu" class="screen">
     <div class="panel">
-      <h1>UNTIL <span>6</span> AM</h1>
-      <p class="sub">Apartment 302, Briar Court. Three nights alone.<br>It's a quiet building. Mostly.</p>
+      <h1>CURFEW <span>CONTROL</span></h1>
+      <p class="sub">Apartment 302. One night. Do your chores, find the key, get out.<br>And when curfew comes: in bed, eyes shut.</p>
       <label class="field">Your name <input id="name" maxlength="12" placeholder="Player" autocomplete="off"></label>
+      <div class="field">Your character
+        <div class="row pick">
+          <button id="pickF" class="ghost" type="button">Female</button>
+          <button id="pickM" class="ghost" type="button">Male</button>
+        </div>
+      </div>
       <div id="mpControls">
         <button id="btnHost">Host a Game</button>
         <p class="small joinHint">Only <b>one</b> person hosts. Everyone else types the host's code here and presses <b>Join</b>:</p>
@@ -59,16 +65,17 @@
     <div class="panel wide">
       <h2>How to play</h2>
       <ul class="help">
-        <li><b>The story:</b> you're apartment-sitting for your aunt for three nights in Apartment 302 (laid out like Room 302 from <i>Silent Hill 4</i>). Every evening you do your chores, go to bed, and wake up in the middle of the night. Each night is worse than the last. And there's a hole in the bathroom wall that keeps getting bigger.</li>
-        <li><b>Chores</b> are listed on the left. Some need you to carry things: take a frozen dinner from the fridge to the microwave, eat at the table, carry your plate to the sink, take the trash bag out to the dumpster in the courtyard, get the clothes out of the dryer and put them in your closet, swap a dead light bulb.</li>
-        <li><b>Doors:</b> every room has a door or an archway. Press E to open or close doors, and Q at the front door to lock it and put the chain on. Lock up before bed.</li>
-        <li><b>Lights:</b> there's a light switch by every doorway. Lights help you see, but they also help him see you.</li>
-        <li><b>At night</b> he walks around the building, knocks, looks in the windows, and later cuts the power and tries to get in. Shine your flashlight in his face through a window to scare him off. Fix the power at the fuse box in the laundry room.</li>
-        <li><b>Planks</b> are on the shelf in the laundry room when you need them. Press E at a window or door to board it up (max 3 each).</li>
-        <li><b>If he gets in:</b> run, and hide in a closet or under a bed. If he sees you hide, he'll find you. You can only stay under the bed for 30 seconds, then you have to wait 45 seconds before hiding there again. A friend can help you up if you get caught.</li>
+        <li><b>The night:</b> it's 9:00 PM in Apartment 302. Do every chore on the clipboard (on the counter next to the kitchen sink). When they're all done, a sticky note with the safe's code appears on it. The safe in the laundry room has the front door key. Unlock the front door and get out before 6:00 AM.</li>
+        <li><b>Look at things to use them:</b> aim the dot right at something and press <b>E</b> (or click). <b>Q</b> is a second action, like locking the back door.</li>
+        <li><b>One thing at a time:</b> you can carry one item (the clipboard, the key, batteries, your dinner...). <b>G</b> puts it back. Your flashlight is in your other hand (<b>F</b>). Pick up batteries and press <b>R</b> to recharge it.</li>
+        <li><b>Your phone</b> comes out by itself when he texts you (your flashlight goes away while it's out). Press <b>1</b> or <b>2</b> to text back. Ignore him and he comes looking.</li>
+        <li><b>Your watch:</b> press <b>T</b> to check the time and when the next curfew is. <b>C</b> reads the clipboard while you hold it.</li>
+        <li><b>Curfew:</b> the lights go out and you have 20 seconds to get into bed (or on the couch) under the blanket. Look up at the ceiling to shut your eyes. Eyes shut, he can't see you. Eyes open, he drags you out. Out of bed with your flashlight on, and he comes through the window.</li>
+        <li><b>The thing in the wall</b> climbs out of the hole in the bathroom and hunts you. He runs a little slower than you can sprint. Close doors, hide in a closet (if he sees you get in, he knows), or get in bed and shut your eyes. Loop him around a table too many times and he goes into a rage.</li>
+        <li><b>Three hits:</b> every hit slows you down. On the third, he drags you away... and you might not wake up.</li>
       </ul>
       <h2>Controls</h2>
-      <p class="small"><b>WASD</b> move &nbsp;·&nbsp; <b>Mouse</b> look around (click the game first; Esc frees the mouse) &nbsp;·&nbsp; <b>Arrow keys</b> walk and turn &nbsp;·&nbsp; <b>Shift</b> sprint &nbsp;·&nbsp; <b>E / Space / Click</b> use things (just tap) &nbsp;·&nbsp; <b>Q</b> lock / second action &nbsp;·&nbsp; <b>G</b> put down what you're holding &nbsp;·&nbsp; <b>F</b> flashlight</p>
+      <p class="small"><b>WASD</b> move &nbsp;·&nbsp; <b>Mouse</b> look (click the game first; Esc frees the mouse) &nbsp;·&nbsp; <b>Shift</b> sprint &nbsp;·&nbsp; <b>E / Click</b> use &nbsp;·&nbsp; <b>Q</b> second action &nbsp;·&nbsp; <b>G</b> put back &nbsp;·&nbsp; <b>F</b> flashlight &nbsp;·&nbsp; <b>R</b> new batteries &nbsp;·&nbsp; <b>T</b> watch &nbsp;·&nbsp; <b>C</b> read clipboard &nbsp;·&nbsp; <b>1 / 2</b> text back &nbsp;·&nbsp; <b>M</b> map</p>
       <p class="small">Play with headphones. Play with friends: one person hosts, everyone else joins with the code.</p>
       <button id="btnHelpBack">Got it</button>
     </div>

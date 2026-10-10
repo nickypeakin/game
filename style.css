@@ -59,3 +59,7 @@ button.ghost:hover { border-color: #666; color: #fff; }
 
 ul.help { padding-left: 18px; line-height: 1.5; font-size: 14px; }
 ul.help li { margin-bottom: 6px; }
+
+.pick { margin-top: 6px; }
+.pick button { flex: 1; margin: 0; padding: 10px 0; }
+.pick button.on { background: #8b0000; border-color: #ff5252; color: #fff; }

@@ -200,6 +200,12 @@ const SFX = (() => {
       osc.connect(g); g.connect(bp); osc.start(t); osc.stop(t + dur + 0.1);
       noise(d, t, dur, { type: "bandpass", freq: 2500, q: 0.7, gain: 0.08, a: 0.2 });
     },
+    safe(d, t) {
+      // the bolts pull back, then the heavy door swings
+      for (let i = 0; i < 3; i++) tone(d, t + i * 0.09, 900 + i * 120, 0.05, { type: "square", gain: 0.08 });
+      noise(d, t + 0.32, 0.12, { freq: 500, gain: 0.9 }); tone(d, t + 0.32, 95, 0.35, { gain: 0.45, freqEnd: 60 });
+      S.creak(d, t + 0.5, { dur: 0.9, gain: 0.6 });
+    },
     sleep(d, t) { for (const [f, o] of [[392, 0], [330, 0.5], [262, 1.0]]) tone(d, t + o, f, 1.4, { gain: 0.12, a: 0.1 }); },
   };
 
