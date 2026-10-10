@@ -304,7 +304,7 @@ function enterPlay(resumed) {
   G.phase = "play";
   show(null);
   G.mySnap = -1; G.rpos = {}; G.msgs = []; G.notes = []; G.call = null; G.card = null; G.scare = 0; G.stam = 100;
-  G.readClip = false; G.watchT = 0; G.keypad = null; G.phone = null; G.lid = 0; G.hitFx = 0; G.me.fl = true; G.wasHidden = false;
+  G.readClip = false; G.watchT = 0; G.keypad = null; G.phone = null; G.lid = 0; G.hitFx = 0; G.black = 0; G.bdoorT = 0; G.lastCarry = null; G.me.fl = true; G.wasHidden = false;
   G.stR = G.S ? { x: G.S.stalker.x, y: G.S.stalker.y, a: G.S.stalker.a } : { x: -30, y: -30, a: 0 };
   G.lastStage = null;
   if (resumed) addMsg("The game was updated. Your night continues.", "#b0bec5");
@@ -393,10 +393,25 @@ function onEvent(e) {
       else { posPlay("scream", e.x, e.y, 0.8); addMsg(e.name + " got hit!", "#ff8a80"); }
       break;
     case "drag": if (e.id === G.myId) { G.scare = 1.4; SFX.play("scream", 1.2); G.readClip = false; G.keypad = null; G.phone = null; } break;
-    case "tvScene": if (e.id === G.myId) { G.me.a = -Math.PI / 2; G.me.pitch = 0; } break;
-    case "knockout": if (e.id === G.myId) SFX.play("bang", 1.2); else addMsg("You hear a heavy thud from the living room...", "#ff8a80"); break;
+    // Russian roulette at the kitchen table
+    case "rrStart":
+      if (e.id === G.myId) {
+        G.me.a = -Math.PI / 2; G.me.pitch = -0.12;
+        addMsg("He sits you down at the kitchen table. A revolver. One bullet.", "#ff8a80", true);
+        SFX.play("spin", 0.9, 0, 2.2);
+      } else addMsg(e.name + " is at the kitchen table with him...", "#ff8a80");
+      break;
+    case "rrTurn": if (e.id === G.myId && e.who === "you") SFX.play("beat", 0.8); break;
+    case "rrAim": if (e.id === G.myId) SFX.play("cock", 0.8); break;
+    case "rrClick": if (e.id === G.myId) { SFX.play("dryfire", 1); G.shake = Math.max(G.shake, 2); } else posPlay("dryfire", e.x, e.y, 0.6); break;
+    case "rrBang":
+      if (e.id === G.myId) { SFX.play("gunshot", 1.2); G.shake = Math.max(G.shake, e.who === "you" ? 4 : 10); if (e.who === "you") G.black = 1; }
+      else { posPlay("gunshot", e.x, e.y, 1.3); addMsg("A gunshot from the kitchen!", "#ff1744", true); }
+      break;
+    case "knockout": break;
+    case "bdoor": G.bdoorT = 2.2; break;
     case "carry": break;
-    case "reset": G.readClip = false; G.keypad = null; G.phone = null; G.thread = []; G.me.pitch = 0; break;
+    case "reset": G.black = 0; G.readClip = false; G.keypad = null; G.phone = null; G.thread = []; G.me.pitch = 0; break;
     case "curfew": SFX.play("chime", 0.9); SFX.play("chime", 0.8, 0, 0.6); SFX.play("chime", 0.7, 0, 1.2); SFX.play("powerout", 0.6, 0, 0.3); break;
     case "note": SFX.play("tick", 0.9); break;
     case "escaped":
@@ -463,7 +478,7 @@ addEventListener("keydown", (e) => {
   }
   if (!e.repeat) {
     if (e.code === "KeyF") { if (!G.phone) { G.me.fl = !G.me.fl; SFX.play("click", 0.4); } }
-    if (e.code === "KeyE" || e.code === "Space") { if (G.readClip) G.readClip = false; else G.pressE++; }
+    if (e.code === "KeyE" || e.code === "Space") useKey();
     if (e.code === "KeyQ") G.pressQ++;
     if (e.code === "KeyG") { G.readClip = false; G.pressG++; }
     if (e.code === "KeyR") G.pressR++;
@@ -482,6 +497,15 @@ addEventListener("keydown", (e) => {
   }
   keys[e.code] = true;
 });
+// E / Space / click: closes the clipboard if you're reading it; with the clipboard
+// in your hand and nothing in front of you, it opens it
+function useKey() {
+  const sp = G.S && G.S.players[G.myId];
+  if (G.readClip) { G.readClip = false; return; }
+  const aiming = G.prompt && ((G.prompt.e && G.prompt.e.can) || (G.prompt.q && G.prompt.q.can));
+  if (sp && sp.carry === "clipboard" && !aiming && !sp.cut) { G.readClip = true; SFX.play("rustle", 0.3); return; }
+  G.pressE++;
+}
 addEventListener("keyup", (e) => { keys[e.code] = false; });
 addEventListener("blur", () => { for (const k in keys) keys[k] = false; mouseDown = false; dragging = false; });
 
@@ -515,12 +539,12 @@ addEventListener("mousemove", (e) => {
 });
 addEventListener("mousedown", (e) => {
   if (G.phase !== "play" || e.button !== 0 || e.target !== R.gl) return;
-  if (G.plock) G.pressE++;
+  if (G.plock) useKey();
   else { mouseDown = true; dragging = true; dragDist = 0; requestLook(); }
 });
 addEventListener("mouseup", () => {
   // without pointer lock, a click that didn't turn into a drag counts as a tap
-  if (mouseDown && G.phase === "play" && !G.plock) G.pressE++;
+  if (mouseDown && G.phase === "play" && !G.plock) useKey();
   mouseDown = false; dragging = false;
 });
 
@@ -549,7 +573,7 @@ function updateLocal(dt, now) {
   if (p.hidden === "bed") G.me.pitch = Math.max(G.me.pitch, -0.35);
   // on the couch with him behind you, you can only turn so far
   if (S.cut && S.cut.id === G.myId) {
-    if (S.cut.ph === "tv") { G.me.a = -Math.PI / 2 + clamp(angDiff(G.me.a, -Math.PI / 2), -2.5, 2.5); G.me.pitch = clamp(G.me.pitch, -0.5, 0.5); }
+    if (S.cut.ph === "rr") { G.me.a = -Math.PI / 2 + clamp(angDiff(G.me.a, -Math.PI / 2), -1.5, 1.5); G.me.pitch = clamp(G.me.pitch, -0.7, 0.5); }
     return;
   }
   G.me.a = Math.atan2(Math.sin(G.me.a), Math.cos(G.me.a));
@@ -564,7 +588,7 @@ function updateLocal(dt, now) {
   const eating = p.act && p.act.kind === "eat";
   const moving = (fw || st) && !p.hidden && !(p.stun > 0) && !eating;
   const sprint = moving && (keys.ShiftLeft || keys.ShiftRight) && G.stam > 1;
-  if (sprint) G.stam = Math.max(0, G.stam - dt * 22);
+  if (sprint) G.stam = Math.max(0, G.stam - dt * 14);
   else G.stam = Math.min(100, G.stam + dt * (moving ? 10 : 18));
   G.sprinting = sprint;
   if (moving) {
@@ -628,6 +652,12 @@ function tickEffects(dt, now) {
   G.hitFx = Math.max(0, G.hitFx - dt * 1.5);
   const sp = S.players[G.myId];
   if (G.readClip && (!sp || sp.carry !== "clipboard")) G.readClip = false;
+  // pick up the clipboard and it comes up in front of you to read
+  const carry = sp ? sp.carry : null;
+  if (carry === "clipboard" && G.lastCarry !== "clipboard" && G.lastCarry !== undefined) G.readClip = true;
+  G.lastCarry = carry;
+  G.black = Math.max(0, (G.black || 0) - dt * 0.15);
+  G.bdoorT = Math.max(0, (G.bdoorT || 0) - dt);
   // eyelids shut when you look up at the ceiling in bed
   const shut = sp && sp.hidden === "bed" && (G.me.pitch || 0) > 0.9 ? 1 : 0;
   G.lid += (shut - G.lid) * Math.min(1, dt * 7);

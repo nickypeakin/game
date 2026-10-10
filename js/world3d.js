@@ -834,10 +834,9 @@ function buildFurniture(world, M, T) {
   }
   for (const b of components("h")) {
     addCyl(world, 0.3, 0.26, 0.72, b.x0 + 0.5, 0, b.y0 + 0.5, M.midwood, 16);
-    const ph = new THREE.Group();
-    addBox(ph, 0.24, 0.08, 0.18, 0, 0, 0, M.red);
-    addBox(ph, 0.26, 0.05, 0.06, 0, 0.09, 0, M.red);
+    const ph = makeDeskPhone();
     ph.position.set(b.x0 + 0.5, 0.72, b.y0 + 0.5);
+    ph.rotation.y = 0.35;
     world.add(ph);
     W3.phone = ph;
     W3.phonePos = { x: b.x0 + 0.5, z: b.y0 + 0.5 };
@@ -1097,6 +1096,141 @@ function buildLights(scene, world, M) {
   }
   W3.scareLight = new THREE.PointLight(0xff2010, 0, 3, 2);
   scene.add(W3.scareLight);
+  // Russian roulette: the revolver, and one bare bulb over the kitchen table
+  W3.gun = makeRevolver();
+  W3.gun.visible = false;
+  scene.add(W3.gun);
+  W3.rrLight = new THREE.PointLight(0xffc27a, 0, 5.5, 1.4);
+  scene.add(W3.rrLight);
+  W3.rrBulb = new THREE.Group();
+  const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.7, 4), new THREE.MeshBasicMaterial({ color: 0x111111 }));
+  cord.position.y = 0.35; W3.rrBulb.add(cord);
+  W3.rrBulbGlass = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), new THREE.MeshBasicMaterial({ color: 0xffe2a8 }));
+  W3.rrBulb.add(W3.rrBulbGlass);
+  W3.rrBulb.visible = false;
+  scene.add(W3.rrBulb);
+}
+
+// The landline: a red push-button desk phone. The keypad slopes toward +z.
+function phoneMats() {
+  if (W3.phoneMats) return W3.phoneMats;
+  const c = document.createElement("canvas"); c.width = 192; c.height = 224;
+  const g = c.getContext("2d");
+  g.fillStyle = "#b5161b"; g.fillRect(0, 0, 192, 224);
+  // the inset panel the buttons sit in
+  g.fillStyle = "#8f1115"; g.fillRect(14, 10, 164, 178);
+  const keys = [["1", ""], ["2", "ABC"], ["3", "DEF"], ["4", "GHI"], ["5", "JKL"], ["6", "MNO"], ["7", "PRS"], ["8", "TUV"], ["9", "WXY"], ["*", ""], ["0", "OPER"], ["#", ""]];
+  keys.forEach(([d, l], i) => {
+    const x = 26 + (i % 3) * 50, y = 18 + Math.floor(i / 3) * 42;
+    g.fillStyle = "#3d3f3f"; g.fillRect(x + 2, y + 3, 40, 34);       // shadow
+    const grd = g.createLinearGradient(0, y, 0, y + 32);
+    grd.addColorStop(0, "#b9bcb8"); grd.addColorStop(1, "#8b8e8a");
+    g.fillStyle = grd; g.fillRect(x, y, 40, 32);
+    g.fillStyle = "#f4f4f0"; g.textAlign = "center";
+    g.font = "bold 9px sans-serif"; if (l) g.fillText(l, x + 20, y + 11);
+    g.font = "bold 15px sans-serif"; g.fillText(d, x + 20, y + (l ? 27 : 22));
+  });
+  // the white number card at the bottom
+  g.fillStyle = "#f2f2ee"; g.fillRect(40, 196, 112, 18);
+  g.strokeStyle = "#c7c7c0"; g.strokeRect(40, 196, 112, 18);
+  const keypad = new THREE.CanvasTexture(c);
+  W3.phoneMats = {
+    body: phong({ color: 0xc4161c, shininess: 120, specular: 0x6a4040 }),
+    keypad: phong({ map: keypad, shininess: 90, specular: 0x553333 }),
+    dark: phong({ color: 0x5e0b0e, shininess: 40 }),
+  };
+  return W3.phoneMats;
+}
+function makeHandset() {
+  const PM = phoneMats(), g = new THREE.Group();
+  // long along x, earpiece at -x, mouthpiece at +x
+  const bar = addBox(g, 0.2, 0.026, 0.042, 0, -0.013, 0, PM.body);
+  bar.geometry.translate(0, 0, 0);
+  for (const s of [-1, 1]) {
+    const cup = addCyl(g, 0.034, 0.03, 0.05, s * 0.11, -0.045, 0, PM.body, 16);
+    cup.scale.z = 0.95;
+    const grill = new THREE.Mesh(new THREE.CircleGeometry(0.026, 16), PM.dark);
+    grill.rotation.x = Math.PI / 2; grill.position.set(s * 0.11, -0.046, 0); g.add(grill);
+    const join = addBox(g, 0.05, 0.03, 0.044, s * 0.092, -0.025, 0, PM.body);
+    join.rotation.z = s * 0.35;
+  }
+  return g;
+}
+function makeDeskPhone() {
+  const PM = phoneMats(), g = new THREE.Group();
+  // the body: a wedge, taller at the back, the keypad on the sloped front
+  const sh = new THREE.Shape();
+  sh.moveTo(0.115, 0); sh.lineTo(-0.115, 0); sh.lineTo(-0.115, 0.085); sh.lineTo(-0.035, 0.092); sh.lineTo(0.115, 0.04); sh.lineTo(0.115, 0);
+  const geo = new THREE.ExtrudeGeometry(sh, { depth: 0.2, bevelEnabled: true, bevelThickness: 0.01, bevelSize: 0.01, bevelSegments: 3 });
+  geo.translate(0, 0, -0.1);
+  const body = new THREE.Mesh(geo, PM.body);
+  body.rotation.y = -Math.PI / 2; // the shape's +x becomes +z (the front)
+  body.castShadow = body.receiveShadow = true;
+  g.add(body);
+  // keypad on the slope
+  const slope = Math.atan2(0.092 - 0.04, 0.115 + 0.035);
+  const kp = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.135), PM.keypad);
+  kp.position.set(0, 0.0765, 0.0436);
+  kp.rotation.x = -Math.PI / 2 + slope;
+  g.add(kp);
+  // the cradle: two prongs at the back, the handset across them
+  for (const s of [-1, 1]) addBox(g, 0.03, 0.03, 0.05, s * 0.07, 0.09, -0.06, PM.body);
+  addBox(g, 0.1, 0.008, 0.03, 0, 0.098, -0.06, PM.dark); // the hook switch between them
+  const hs = makeHandset();
+  hs.position.set(0, 0.14, -0.06);
+  g.add(hs);
+  W3.phoneHandset = hs;
+  // little feet
+  for (const [x, z] of [[-0.09, -0.09], [0.09, -0.09], [-0.09, 0.09], [0.09, 0.09]]) addCyl(g, 0.012, 0.012, 0.008, x, -0.008, z, PM.dark, 6);
+  // the coiled cord: handset end, down onto the table, round to the side of the phone
+  const path = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(-0.115, 0.13, -0.06), new THREE.Vector3(-0.17, 0.07, 0.0), new THREE.Vector3(-0.2, 0.012, 0.1),
+    new THREE.Vector3(-0.15, 0.012, 0.2), new THREE.Vector3(-0.07, 0.012, 0.19), new THREE.Vector3(-0.11, 0.025, 0.08),
+  ]);
+  const pts = [], N = 420, turns = 70, rad = 0.011, up = new THREE.Vector3(0, 1, 0);
+  for (let i = 0; i <= N; i++) {
+    const u = i / N, P = path.getPointAt(u), T = path.getTangentAt(u);
+    let A = new THREE.Vector3().crossVectors(T, up);
+    if (A.lengthSq() < 1e-4) A.set(1, 0, 0);
+    A.normalize();
+    const B = new THREE.Vector3().crossVectors(T, A).normalize();
+    const w = u * turns * Math.PI * 2;
+    pts.push(P.add(A.multiplyScalar(Math.cos(w) * rad)).add(B.multiplyScalar(Math.sin(w) * rad)));
+  }
+  const cord = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 900, 0.0032, 4, false), PM.body);
+  g.add(cord);
+  return g;
+}
+
+// an old revolver: the barrel points along +z
+function makeRevolver() {
+  const g = new THREE.Group();
+  const metal = phong({ color: 0x2b2d31, shininess: 70, specular: 0x667080 });
+  const wood = phong({ color: 0x5b3a22, shininess: 25 });
+  const barrel = addCyl(g, 0.011, 0.011, 0.15, 0, 0, 0, metal, 10);
+  barrel.rotation.x = Math.PI / 2; barrel.position.set(0, 0.012, 0.075);
+  addBox(g, 0.008, 0.008, 0.15, 0, 0.018, 0.075, metal);
+  const drum = addCyl(g, 0.024, 0.024, 0.042, 0, 0, 0, metal, 12);
+  drum.rotation.x = Math.PI / 2; drum.position.set(0, 0.0, -0.025);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const f = addBox(g, 0.006, 0.006, 0.044, Math.cos(a) * 0.024, Math.sin(a) * 0.024 - 0.003, -0.025, phong({ color: 0x1a1b1e }));
+    f.rotation.z = a;
+  }
+  addBox(g, 0.022, 0.03, 0.07, 0, -0.03, -0.035, metal);           // frame
+  const grip = addBox(g, 0.026, 0.075, 0.032, 0, -0.085, -0.075, wood);
+  grip.rotation.x = -0.35;
+  addBox(g, 0.008, 0.016, 0.012, 0, 0.012, -0.068, metal);         // hammer
+  const guard = new THREE.Mesh(new THREE.TorusGeometry(0.016, 0.003, 4, 10, Math.PI * 1.3), metal);
+  guard.rotation.y = Math.PI / 2; guard.position.set(0, -0.045, -0.03); g.add(guard);
+  // the hand holding it (shown when it's in yours)
+  const hand = new THREE.Group();
+  addBox(hand, 0.05, 0.09, 0.06, 0, -0.08, -0.07, phong({ color: 0xd6b08c }));
+  addBox(hand, 0.055, 0.06, 0.16, 0, -0.1, -0.2, phong({ color: 0x2f3440 }));
+  g.add(hand);
+  g.userData.hand = hand;
+  g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+  return g;
 }
 
 // things you carry, shown in your hand and in your friends' hands
@@ -1153,9 +1287,7 @@ function makeItem(kind, n) {
     }
     case "handset": {
       // the landline receiver, held up to your ear
-      addBox(g, 0.06, 0.05, 0.24, 0, 0, 0, M.red);
-      addBox(g, 0.08, 0.07, 0.07, 0, -0.03, -0.11, M.red);
-      addBox(g, 0.08, 0.07, 0.07, 0, -0.03, 0.11, M.red);
+      { const h = makeHandset(); h.rotation.y = Math.PI / 2; h.position.y = 0.03; g.add(h); }
       g.position.set(0.12, 0.16, -0.08);
       g.rotation.set(0.2, 0.5, 1.35);
       g.scale.setScalar(0.8);
@@ -1351,6 +1483,7 @@ function poseStalker(model, x, z, a, t, opts) {
     A.sh.rotation.x = bang > 0 ? -1.7 * Math.sin((1 - bang / 0.4) * Math.PI) : opts.reach ? -1.2 : s * (0.25 + run * 0.7) + Math.sin(t * 1.1 + i) * 0.05;
     A.sh.rotation.z = (i ? -1 : 1) * (0.08 + (opts.carry && i ? 0.5 : 0));
     A.el.rotation.x = -0.25 - run * 0.4;
+    A.el.rotation.z = 0;
   });
   // the head: slow lolling, and every so often a sudden jerk to one side
   model.twitch -= 1 / 60;
@@ -1359,6 +1492,26 @@ function poseStalker(model, x, z, a, t, opts) {
   p.head.rotation.z = Math.sin(t * 0.6) * 0.2 + (model.twHold > 0 ? model.tw * 0.7 : 0);
   p.head.rotation.x = -0.15 - run * 0.2;
   p.head.rotation.y = opts.look || 0;
+  if (opts.sit) {
+    // sitting in a kitchen chair, leaning over the table
+    const sl = opts.slump || 0, aim = opts.aim || 0;
+    p.body.position.y = -0.55;
+    p.legs.forEach((L) => { L.hip.rotation.x = -1.5; L.knee.rotation.x = 1.5; });
+    p.torso.rotation.x = 0.25 + sl * 0.75 - (opts.recoil || 0) * 0.5;
+    p.head.rotation.x = -0.2 + sl * 0.7 - (opts.recoil || 0) * 0.9;
+    if (sl > 0.5) p.head.rotation.z = 0.5 * sl;
+    p.arms.forEach((A, i) => {
+      A.sh.rotation.z = (i ? -1 : 1) * 0.12;
+      A.sh.rotation.x = sl > 0.3 ? -0.5 : -0.95;
+      A.el.rotation.x = sl > 0.3 ? -0.2 : -0.7;
+    });
+    // right arm: elbow out to the side, the gun up against his temple
+    const R0 = p.arms[0], mix = (a, b) => a * (1 - aim) + b * aim;
+    R0.sh.rotation.x = mix(R0.sh.rotation.x, -2.4);
+    R0.sh.rotation.z = mix(R0.sh.rotation.z, -1.2);
+    R0.el.rotation.x = mix(R0.el.rotation.x, -2.8);
+    R0.el.rotation.z = 0.6 * aim;
+  }
 }
 
 // ------------------------------ per-frame ----------------------------------
@@ -1420,7 +1573,8 @@ function updateWorld(S, t, dt) {
   }
   // the phone rattles when it rings
   W3.phone.position.x = W3.phonePos.x + (S.phone > 0 ? (Math.random() - 0.5) * 0.02 : 0);
-  W3.phone.rotation.y = S.phone > 0 ? (Math.random() - 0.5) * 0.15 : 0;
+  W3.phone.rotation.y = 0.35 + (S.phone > 0 ? (Math.random() - 0.5) * 0.15 : 0);
+  if (W3.phoneHandset) W3.phoneHandset.position.y = 0.14 + (S.phone > 0 ? Math.random() * 0.012 : 0);
   // doors and windows
   W3.entries.forEach((o, i) => {
     const e = S.entries[i];
@@ -1429,7 +1583,8 @@ function updateWorld(S, t, dt) {
     o.g.position.z = o.base.z + (Math.random() - 0.5) * j;
     if (o.glass) { o.glass.visible = !e.broken; o.shards.forEach((s) => (s.visible = e.broken)); }
     if (o.door) {
-      o.rot = lerpTo(o.rot, e.broken ? o.openRot * 1.15 : e.open ? o.openRot : 0, k);
+      const swing = i === BACK_DOOR && (G.bdoorT || 0) > 0.6;
+      o.rot = lerpTo(o.rot, e.broken ? o.openRot * 1.15 : e.open || swing ? o.openRot : 0, k);
       o.door.rotation.y = o.rot;
       o.door.rotation.z = e.broken ? 0.06 : 0;
       o.bolt.position.x = e.locked ? 0.36 : 0.3;
@@ -1451,7 +1606,7 @@ function setHeld(group, holder, kind, n) {
 function updateCharacters(S, me, G, t) {
   const sr = G.stR, st = W3.stalker, ss = S.stalker;
   st.group.visible = ss.state !== "away" && ss.state !== "rageAway";
-  if (st.group.visible) poseStalker(st, sr.x, sr.y, sr.a, t, { spd: ss.spd, bang: G.stBang || 0, carry: ss.state === "carry", reach: ss.state === "window" || ss.state === "tv" });
+  if (st.group.visible) poseStalker(st, sr.x, sr.y, sr.a, t, { spd: ss.spd, bang: G.stBang || 0, carry: ss.state === "carry", reach: ss.state === "window", sit: ss.state === "rr", ...rrPose(S, t) });
   if (G.phantom) {
     W3.phantom.group.visible = true;
     poseStalker(W3.phantom, G.phantom.x, G.phantom.y, G.phantom.a, t, { spd: 0 });
@@ -1473,8 +1628,8 @@ function updateCharacters(S, me, G, t) {
       const la = Math.atan2(sr.y - r.y, sr.x - r.x);
       m.group.position.set(r.x - Math.cos(la) * 0.85, 0.18, r.y - Math.sin(la) * 0.85);
       m.group.rotation.set(-Math.PI / 2, faceYaw(la), 0, "YXZ");
-    } else if (cut === "tv" || cut === "ko") {
-      m.group.position.set(SPOTS.couch.x, -0.35, SPOTS.couch.y);
+    } else if (cut === "rr" || cut === "ko") {
+      m.group.position.set(SPOTS.rrYou.x, -0.35, SPOTS.rrYou.y + 0.05);
       m.group.rotation.set(0, faceYaw(-Math.PI / 2), 0, "YXZ");
     } else if (cut === "carry") {
       // over his shoulder
@@ -1543,8 +1698,10 @@ function placeCamera(S, me, G, t) {
     const la = Math.atan2(sr.y - me.y, sr.x - me.x);
     x = me.x - Math.cos(la) * 0.7; z = me.y - Math.sin(la) * 0.7; y = 0.32 + Math.sin(t * 7) * 0.02;
     yaw = -la - Math.PI / 2; pitch = 0.35; roll = Math.sin(t * 3.1) * 0.12;
-  } else if (cut && (cut.ph === "tv" || cut.ph === "ko")) {
-    x = SPOTS.couch.x; z = SPOTS.couch.y; y = 1.05;
+  } else if (cut && (cut.ph === "rr" || cut.ph === "ko")) {
+    // sitting at the kitchen table, across from him
+    x = SPOTS.rrYou.x; z = SPOTS.rrYou.y + 0.08; y = 1.13;
+    if (cut.step === "youAim" || cut.step === "youShot") { roll = -0.1; x += 0.03; y += Math.sin(t * 31) * 0.003; }
   } else if (cut && cut.ph === "carry") {
     // slung over his shoulder, looking down his back at the floor going by
     x = sr.x - Math.cos(sr.a) * 0.35; z = sr.y - Math.sin(sr.a) * 0.35; y = 1.75;
@@ -1584,6 +1741,79 @@ function poseScare(G, t) {
   W3.scareLight.intensity = 2.5;
 }
 
+// how he moves at the table, from where the game is up to
+function rrPose(S, t) {
+  const c = S.cut;
+  if (!c || c.ph !== "rr") return {};
+  const st = c.st || 0;
+  if (c.step === "intro") return { aim: st < 2.4 ? 0.3 : 0 };
+  if (c.step === "hisAim") return { aim: Math.min(1, st / 0.8) };
+  if (c.step === "him") return { aim: Math.max(0, (st - 1) / 1) * 0.6 };
+  if (c.step === "hisSafe") return { aim: Math.max(0, 1 - st / 0.8) };
+  if (c.step === "hisShot") {
+    // the shot snaps his head back, he slumps over the table... then he sits back up
+    const recoil = st < 0.5 ? Math.sin(st / 0.5 * Math.PI) : 0;
+    const slump = st < 0.4 ? 0 : st < 3.6 ? Math.min(1, (st - 0.4) * 3) : Math.max(0, 1 - (st - 3.6) / 1.6);
+    return { recoil, slump, aim: st < 0.3 ? 1 : 0 };
+  }
+  return {};
+}
+
+const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3();
+function updateRoulette(S, me, G, t) {
+  const c = S.cut && S.cut.ph === "rr" ? S.cut : null;
+  const gun = W3.gun;
+  W3.rrLight.intensity = 0; W3.rrBulb.visible = false;
+  if (!c) { gun.visible = false; return; }
+  // the bulb over the table, swinging a little
+  const bx = SPOTS.rrGun.x + Math.sin(t * 1.1) * 0.07, bz = SPOTS.rrGun.y + Math.cos(t * 0.8) * 0.04;
+  W3.rrBulb.visible = true; W3.rrBulb.position.set(bx, 1.95, bz);
+  W3.rrLight.position.set(bx, 1.9, bz);
+  W3.rrLight.intensity = 1.25 + (Math.random() < 0.04 ? -0.6 : 0);
+  gun.visible = true;
+  gun.userData.hand.visible = false;
+  const mine = c.id === me.id, st = c.st || 0;
+  const onTable = (x, z, yaw) => { gun.position.set(x, 0.765, z); gun.rotation.set(0, yaw, Math.PI / 2, "YXZ"); };
+  const model = W3.stalker;
+  const atHisHead = () => {
+    // in his right hand, pointed at his head
+    model.group.updateMatrixWorld(true);
+    model.parts.head.getWorldPosition(_v1);
+    _v2.set(0, -0.6, 0.02); model.parts.arms[0].el.localToWorld(_v2);
+    gun.position.copy(_v2);
+    gun.rotation.set(0, 0, 0);
+    gun.lookAt(_v1);
+  };
+  const atYourHead = () => {
+    if (mine) {
+      // in your hand, pressed to the side of your head
+      const cam = W3.camera;
+      _v1.set(0.15, -0.07, -0.26); cam.localToWorld(_v1);
+      _v2.set(0.03, 0.03, -0.02); cam.localToWorld(_v2);
+      gun.position.copy(_v1);
+      gun.rotation.set(0, 0, 0);
+      gun.lookAt(_v2);
+      gun.userData.hand.visible = true;
+    } else {
+      _v2.set(SPOTS.rrYou.x, 1.22, SPOTS.rrYou.y + 0.05);
+      gun.position.set(_v2.x + 0.2, _v2.y, _v2.z);
+      gun.rotation.set(0, 0, 0);
+      gun.lookAt(_v2);
+    }
+  };
+  switch (c.step) {
+    case "intro": if (st < 2.4) { atHisHead(); gun.lookAt(_v1.set(gun.position.x, gun.position.y + 1, gun.position.z + 0.3)); } else onTable(SPOTS.rrGun.x, SPOTS.rrGun.y + 0.42, 0.4); break;
+    case "you": onTable(SPOTS.rrGun.x, SPOTS.rrGun.y + 0.42, 0.4); break;
+    case "youAim": case "youShot": atYourHead(); break;
+    case "youSafe": if (st < 0.6) atYourHead(); else onTable(SPOTS.rrGun.x, SPOTS.rrGun.y + 0.15, -0.3); break;
+    case "him": if (st < 1) onTable(SPOTS.rrGun.x, SPOTS.rrGun.y + 0.15, -0.3); else atHisHead(); break;
+    case "hisAim": atHisHead(); break;
+    case "hisSafe": if (st < 0.8) atHisHead(); else onTable(SPOTS.rrGun.x, SPOTS.rrGun.y + 0.42, 0.4); break;
+    case "hisShot": if (st < 0.3) atHisHead(); else onTable(SPOTS.rrGun.x + 0.35, SPOTS.rrGun.y - 0.4, 2.2); break;
+    default: gun.visible = false;
+  }
+}
+
 function renderGame(S, me, G, t, dt) {
   if (!R.ok) return drawNoGL();
   opts3d.menu = false;
@@ -1591,12 +1821,7 @@ function renderGame(S, me, G, t, dt) {
   placeCamera(S, me, G, t);
   updateCharacters(S, me, G, t);
   W3.scareLight.intensity = 0;
-  if (S.stalker && S.stalker.state === "tv" && G.stR) {
-    // standing behind the couch in the dark: a faint red glow on his mask, so you can just make him out
-    const a = G.stR.a;
-    W3.scareLight.position.set(G.stR.x + Math.cos(a) * 0.55, 1.75, G.stR.y + Math.sin(a) * 0.55);
-    W3.scareLight.intensity = 0.9 + Math.sin(t * 2.3) * 0.15;
-  }
+  updateRoulette(S, me, G, t);
   if (G.scare > 0) poseScare(G, t);
   updateFlashlights(S, me, G, t);
   W3.renderer.render(W3.scene, W3.camera);

@@ -5,7 +5,7 @@ A first-person 3D co-op horror game for the browser (made for Chromebooks).
 It's 9:00 PM in Apartment 302, laid out like Room 302 from *Silent Hill 4: The Room*:
 the locked front door opens into the kitchen and living room, a laundry room sits by the
 door, a hallway leads back to the bedroom and the bathroom, and the back door goes out
-to a fenced backyard. Something lives behind the hole in the bathroom wall.
+to a fenced backyard. Something with a key to the back door comes in at night.
 
 Do every chore on the clipboard. When they're done, a sticky note with the code to the
 laundry room safe appears on it. The safe holds the front door key. Get out before
@@ -42,7 +42,7 @@ save. After a minute the game is live at `https://<your-username>.github.io/<rep
 | F | Flashlight on/off (it's in your left hand) |
 | R | Put new batteries in your flashlight (while holding batteries) |
 | T | Check your watch: the time and the next curfew |
-| C | Read the clipboard (while holding it) |
+| C | Read the clipboard (it also comes up by itself when you pick it up) |
 | 1 / 2 | Text him back |
 | M | Map |
 
@@ -71,17 +71,19 @@ save. After a minute the game is live at `https://<your-username>.github.io/<rep
   with your flashlight on, and he shows up at the window next to you and comes through.
   You can only stay in bed 30 seconds at a time outside a curfew, then you have to wait
   45 seconds.
-- **The thing in the wall** climbs out of the hole in the bathroom and hunts you. He
-  can't go through walls, but he opens doors. He runs a little slower than you can
-  sprint. Every hit slows you down for good, and he slows down to match. Loop him around a
-  table too many times and he screams, runs out the front door, and comes back much
-  faster. Closets are risky: if he sees you get in, he knows.
-- **Three hits** and he drags you by the foot to the couch, turns off the lights, and
-  makes you watch the TV while he stands behind you. Then it's a coin toss: you're
-  knocked out for good, or he carries you back to bed and the night starts over at
-  9:00 PM, with him at 150% of your speed.
+- **He always comes in through the back door** (he has a key) and hunts you. He can't go
+  through walls, but he opens doors. He runs slower than you can sprint, but faster than
+  you walk. Every hit slows you down for good, and he slows down to match. Run him around
+  a table (or keep one between you) for too long and he screams, runs out the front
+  door, and comes back in the back door faster. Closets are risky: if he sees you get
+  in, he knows.
+- **Three hits** and he drags you by the foot to the kitchen table, turns off the lights
+  and sits down across from you with a revolver: one bullet, you go first (E pulls the
+  trigger; wait too long and he makes you), then him, then you... If it goes off on your
+  turn, you're out. If it goes off on his, it doesn't stop him: he carries you back to
+  bed and the night starts over at 9:00 PM, with him faster than before.
 - **Winning:** get out the front door. With friends, the game ends when everyone has
-  either gotten out or been knocked out. At 6:00 AM, anyone still inside loses.
+  either gotten out or lost the roulette. At 6:00 AM, anyone still inside loses.
 
 ## Notes
 

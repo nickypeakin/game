@@ -206,6 +206,16 @@ const SFX = (() => {
       noise(d, t + 0.32, 0.12, { freq: 500, gain: 0.9 }); tone(d, t + 0.32, 95, 0.35, { gain: 0.45, freqEnd: 60 });
       S.creak(d, t + 0.5, { dur: 0.9, gain: 0.6 });
     },
+    // the revolver: the cylinder spinning, an empty chamber, and the shot
+    spin(d, t) { for (let i = 0; i < 16; i++) { const tt = t + i * (0.035 + i * 0.006); noise(d, tt, 0.02, { type: "highpass", freq: 3500, gain: 0.5 }); tone(d, tt, 1400, 0.015, { type: "square", gain: 0.04 }); } },
+    dryfire(d, t) { noise(d, t, 0.04, { type: "highpass", freq: 2200, gain: 1.1 }); tone(d, t, 380, 0.05, { type: "square", gain: 0.18 }); noise(d, t + 0.05, 0.05, { type: "bandpass", freq: 1200, q: 3, gain: 0.5 }); },
+    cock(d, t) { noise(d, t, 0.03, { type: "highpass", freq: 2600, gain: 0.7 }); noise(d, t + 0.08, 0.04, { type: "bandpass", freq: 1600, q: 2, gain: 0.8 }); },
+    gunshot(d, t) {
+      noise(d, t, 0.06, { type: "highpass", freq: 1200, gain: 3 });
+      noise(d, t, 0.9, { freq: 2400, freqEnd: 120, gain: 2.6 });
+      tone(d, t, 90, 0.6, { gain: 1.8, freqEnd: 28 });
+      noise(d, t + 0.2, 1.6, { type: "bandpass", freq: 500, q: 0.5, gain: 0.35, a: 0.1 });
+    },
     sleep(d, t) { for (const [f, o] of [[392, 0], [330, 0.5], [262, 1.0]]) tone(d, t + o, f, 1.4, { gain: 0.12, a: 0.1 }); },
   };
 

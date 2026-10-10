@@ -15,9 +15,10 @@ const REACH = 2.0;                 // how far away you can use things
 const FL_RANGE = 9, FL_HALF = 0.42;
 const MAX_STRIKES = 3;
 const STRIKE_SLOW = 0.9;           // each hit leaves you a little slower, for good
-const CHASE_RATIO = 0.92;          // he runs a little slower than you can sprint...
-const RAGE_RATIO = 1.25;           // ...unless you keep looping him around the furniture
-const RESET_RATIO = 1.5;           // ...or he already had you once tonight
+const CHASE_RATIO = 0.8;           // he runs slower than you can sprint (but faster than you walk)...
+const RAGE_RATIO = 1.1;            // ...unless you keep looping him around the furniture
+const RESET_RATIO = 1.2;           // ...or he already had you once tonight
+const RR_WAIT = 10;                // seconds he waits for you to pull the trigger
 const BED_MAX = 30;                // seconds you can stay in bed (outside a curfew)
 const BED_COOLDOWN = 45;           // then this long before you can get back in
 const NIGHT_MINS = 540;            // 9:00 PM to 6:00 AM
@@ -450,7 +451,7 @@ function publicState(S) {
     laundry: S.laundry, shelf: S.shelf, clip: S.clip, note: S.note, safe: { open: S.safe.open, key: S.safe.key },
     code: S.note ? S.safe.code : null, unlocked: S.unlocked, batts: S.batts.map((b) => ({ x: b.x, y: b.y, h: b.h, here: b.here })), tasks: S.tasks,
     curfew: { state: S.curfew.state, t: +S.curfew.t.toFixed(1) }, resets: S.resets,
-    cut: S.cut ? { id: S.cut.id, ph: S.cut.ph, t: +S.cut.t.toFixed(2) } : null,
+    cut: S.cut ? { id: S.cut.id, ph: S.cut.ph, t: +S.cut.t.toFixed(2), step: S.cut.step, st: S.cut.st != null ? +S.cut.st.toFixed(2) : 0, n: S.cut.n || 0 } : null,
     players,
     stalker: { x: +st.x.toFixed(2), y: +st.y.toFixed(2), a: +st.a.toFixed(2), mode: st.mode, state: st.state, rage: st.rage, spd: +st.spd.toFixed(2), stun: false },
   };
@@ -551,6 +552,7 @@ function updatePlayers(S, inputs, dt) {
       return last !== undefined && inp[k] !== last;
     };
     const pe = pressed("ep"), pq = pressed("qp"), pg = pressed("gp"), pr = pressed("rl"), prep = pressed("rp"), psc = pressed("sc");
+    if (pe && S.cut && S.cut.id === p.id && S.cut.ph === "rr" && S.cut.step === "you") S.cut.pull = true;
     if (!active(p)) { p.act = null; continue; }
     if (flashOn(p)) p.bat = Math.max(0, p.bat - dt * 0.45);
     if (p.bedCD > 0) p.bedCD = Math.max(0, p.bedCD - dt);
@@ -979,11 +981,18 @@ function heardPlayer(S) {
   return null;
 }
 
+// he always comes in through the back door. He has a key.
 function emerge(S) {
-  const st = S.stalker;
-  Object.assign(st, { mode: "in", x: SPOTS.holeIn.x, y: SPOTS.holeIn.y, a: 0, path: [], pause: 0, wait: 2.2, lastSeen: null, target: null, lostT: 0 });
-  emit({ k: "scratch", x: SPOTS.hole.x, y: SPOTS.hole.y });
-  emit({ k: "creak", x: SPOTS.hole.x, y: SPOTS.hole.y, heavy: true });
+  const st = S.stalker, E = ENTRIES[BACK_DOOR];
+  Object.assign(st, { mode: "in", x: E.ix, y: E.iy, a: 0, path: [], pause: 0.8, wait: 2.2, lastSeen: null, target: null, lostT: 0 });
+  backDoorSwing(S);
+}
+// the back door swings open and shut again (and he locks it behind him)
+function backDoorSwing(S) {
+  const E = ENTRIES[BACK_DOOR];
+  if (S.entries[BACK_DOOR].locked) emit({ k: "lock", x: E.x + 0.5, y: E.y + 0.5 });
+  emit({ k: "creak", x: E.x + 0.5, y: E.y + 0.5, heavy: true });
+  emit({ k: "bdoor" });
 }
 function startPatrol(S) {
   const st = S.stalker;
@@ -994,7 +1003,7 @@ function startPatrol(S) {
 function goReturn(S) {
   const st = S.stalker;
   st.state = "return"; st.target = null; st.rage = false;
-  if (!goTo(st, SPOTS.holeIn.x, SPOTS.holeIn.y)) vanish(S, 30);
+  if (!goTo(st, ENTRIES[BACK_DOOR].ix, ENTRIES[BACK_DOOR].iy)) vanish(S, 30);
 }
 function vanish(S, away) {
   const st = S.stalker;
@@ -1034,7 +1043,7 @@ function updateStalker(S, dt) {
       st.timer -= dt;
       if (st.timer <= 0) {
         emerge(S); startPatrol(S);
-        if (!S.dir.fired.firstOut) { S.dir.fired.firstOut = true; emit({ k: "msg", text: "Something is scraping inside the bathroom wall...", c: "#ff8a80", big: true }); }
+        if (!S.dir.fired.firstOut) { S.dir.fired.firstOut = true; emit({ k: "msg", text: "The back door just opened. Someone came in...", c: "#ff8a80", big: true }); }
       }
       return;
     case "watch": {
@@ -1065,10 +1074,11 @@ function updateStalker(S, dt) {
     case "rageAway":
       st.timer -= dt;
       if (st.timer <= 0) {
-        const E = ENTRIES[FRONT_DOOR];
+        // round the outside of the building and back in through the back door
+        const E = ENTRIES[BACK_DOOR];
         Object.assign(st, { mode: "in", x: E.ix, y: E.iy, path: [], pause: 0.3, rage: true });
-        emit({ k: "creak", x: E.x + 0.5, y: E.y + 0.5, heavy: true });
-        emit({ k: "msg", text: "He's back. And he's FAST.", c: "#ff1744", big: true });
+        backDoorSwing(S);
+        emit({ k: "msg", text: "The back door bangs open. He's back. And he's FAST.", c: "#ff1744", big: true });
         const p = S.players[st.target];
         if (p && active(p) && !p.hidden) startChase(S, p); else startSearch(S, p ? p.x : null, p ? p.y : null);
       }
@@ -1180,7 +1190,7 @@ function updateStalker(S, dt) {
     case "return":
     case "retreat":
       if (followPath(S, st, walkSpeed(S) * (st.state === "retreat" ? 1.5 : 1), dt)) {
-        emit({ k: "scratch", x: SPOTS.hole.x, y: SPOTS.hole.y });
+        backDoorSwing(S);
         vanish(S, st.state === "retreat" ? 25 : Math.max(18, 55 - nightProgress(S) * 30 + rand(0, 20)));
       } else if (st.state === "return") {
         const p = spotPlayer(S);
@@ -1204,10 +1214,12 @@ function trackLoop(S, p, dt) {
   }
   L.away = 0;
   const ang = Math.atan2(p.y - C.y, p.x - C.x);
-  if (L.c !== ci) { L.c = ci; L.last = ang; L.acc = 0; return false; }
+  if (L.c !== ci) { L.c = ci; L.last = ang; L.acc = 0; L.time = 0; return false; }
   L.acc += angDiff(ang, L.last);
   L.last = ang;
-  return Math.abs(L.acc) > Math.PI * 2.5;
+  // running laps, or just keeping the table between you and him
+  L.time = (L.time || 0) + dt;
+  return Math.abs(L.acc) > Math.PI * 2.5 || L.time > 8;
 }
 
 function startRage(S, p) {
@@ -1253,13 +1265,15 @@ function strike(S, p, how) {
   emit({ k: "msg", to: p.id, text: how === "closet" ? "He ripped the closet open and dragged you out!" : how === "bed" ? "Your eyes were open. He pulled you out of bed!" : "He hit you!", c: "#ff1744", big: true });
   emit({ k: "msg", to: p.id, text: "Strike " + p.strikes + " of " + MAX_STRIKES + ". You're slower now." + (MAX_STRIKES - p.strikes === 1 ? " One more and he takes you." : ""), c: "#ff8a80" });
   st.state = "retreat"; st.target = null;
-  if (!goTo(st, SPOTS.holeIn.x, SPOTS.holeIn.y)) vanish(S, 25);
+  if (!goTo(st, ENTRIES[BACK_DOOR].ix, ENTRIES[BACK_DOOR].iy)) vanish(S, 25);
 }
 
 // --------------------------- the third strike --------------------------------
-// He drags you by the foot to the couch, puts the TV on, and stands behind you.
-// Then it's a coin toss: lights out for good, or he carries you back to bed and
-// the night starts over (and he's faster).
+// He drags you by the foot to the kitchen table, sits down across from you and
+// puts a revolver between you: one bullet, you go first, then him, and so on.
+// If it goes off on your turn, you're out for good. If it goes off on his, it
+// doesn't stop him: he carries you back to bed and the night starts over (and
+// he's faster).
 function startDefeat(S, p) {
   const st = S.stalker;
   p.cut = true; p.hidden = false; p.act = null; p.text = null;
@@ -1267,7 +1281,7 @@ function startDefeat(S, p) {
   Object.assign(st, { state: "drag", target: p.id, rage: false, mode: "in", pause: 0 });
   emit({ k: "drag", id: p.id, name: p.name, x: p.x, y: p.y });
   emit({ k: "msg", text: p.name + " was caught for the third time...", c: "#ff1744", big: true });
-  if (!goTo(st, 11.5, 20.5)) st.path = [];
+  if (!goTo(st, SPOTS.rrDrag.x, SPOTS.rrDrag.y)) st.path = [];
 }
 
 function updateCutscene(S, dt) {
@@ -1281,27 +1295,47 @@ function updateCutscene(S, dt) {
     if (d > 1.15) { p.x = st.x + dx / d * 1.15; p.y = st.y + dy / d * 1.15; }
     p.a = Math.atan2(st.y - p.y, st.x - p.x); p.snap++;
     if (done) {
-      c.ph = "tv"; c.t = 0;
+      Object.assign(c, { ph: "rr", t: 0, step: "intro", st: 0, n: 0, shot: Math.floor(Math.random() * 6), pull: false });
       for (const id in S.rooms) S.rooms[id].on = false;
-      S.tv = true;
-      p.x = SPOTS.couch.x; p.y = SPOTS.couch.y; p.a = -Math.PI / 2; p.snap++;
-      Object.assign(st, { x: SPOTS.behindCouch.x, y: SPOTS.behindCouch.y, a: -Math.PI / 2, path: [], state: "tv", spd: 0 });
-      emit({ k: "tvScene", id: p.id });
+      p.x = SPOTS.rrYou.x; p.y = SPOTS.rrYou.y; p.a = -Math.PI / 2; p.snap++;
+      Object.assign(st, { x: SPOTS.rrHim.x, y: SPOTS.rrHim.y, a: Math.PI / 2, path: [], state: "rr", spd: 0 });
+      emit({ k: "rrStart", id: p.id, name: p.name });
     }
-  } else if (c.ph === "tv") {
-    if (c.t > 9) {
-      c.t = 0;
-      if (Math.random() < 0.5) { c.ph = "ko"; emit({ k: "knockout", id: p.id }); }
-      else {
-        c.ph = "carry"; st.state = "carry";
-        if (!goTo(st, 11.5, 8.5)) st.path = [];
-        emit({ k: "carry", id: p.id });
-      }
+  } else if (c.ph === "rr") {
+    c.st += dt;
+    const next = (step, ev) => { c.step = step; c.st = 0; c.pull = false; if (ev) emit(Object.assign({ id: p.id }, ev)); };
+    const fire = (who) => {
+      if (c.n === c.shot) next(who === "you" ? "youShot" : "hisShot", { k: "rrBang", who, x: SPOTS.rrGun.x, y: SPOTS.rrGun.y });
+      else { c.n++; next(who === "you" ? "youSafe" : "hisSafe", { k: "rrClick", who, x: SPOTS.rrGun.x, y: SPOTS.rrGun.y }); }
+    };
+    switch (c.step) {
+      case "intro": if (c.st > 5) next("you", { k: "rrTurn", who: "you" }); break;
+      case "you":
+        if (c.pull || c.st > RR_WAIT) {
+          if (!c.pull) emit({ k: "msg", to: p.id, text: "He won't wait. He pushes your hand up to your head.", c: "#ff8a80" });
+          next("youAim", { k: "rrAim", who: "you" });
+        }
+        break;
+      case "youAim": if (c.st > 1.6) fire("you"); break;
+      case "youSafe": if (c.st > 1.8) next("him", { k: "rrTurn", who: "him" }); break;
+      case "him": if (c.st > 2) next("hisAim", { k: "rrAim", who: "him" }); break;
+      case "hisAim": if (c.st > 1.8) fire("him"); break;
+      case "hisSafe": if (c.st > 1.8) next("you", { k: "rrTurn", who: "you" }); break;
+      case "youShot": if (c.st > 1.2) { c.ph = "ko"; c.t = 0; emit({ k: "knockout", id: p.id }); } break;
+      case "hisShot":
+        // it doesn't stop him. He sits back up, gets up, and picks you up.
+        if (c.st > 6) {
+          c.ph = "carry"; c.t = 0; st.state = "carry";
+          st.x = SPOTS.rrHim.x; st.y = SPOTS.rrHim.y - 0.5;
+          if (!goTo(st, 11.5, 8.5)) st.path = [];
+          emit({ k: "carry", id: p.id });
+        }
+        break;
     }
   } else if (c.ph === "ko") {
     if (c.t > 3) {
-      p.down = true; p.cut = false; S.cut = null; S.tv = false;
-      emit({ k: "msg", text: p.name + " was knocked out.", c: "#ff1744", big: true });
+      p.down = true; p.cut = false; S.cut = null;
+      emit({ k: "msg", text: p.name + " is gone.", c: "#ff1744", big: true });
       vanish(S, 30);
     }
   } else if (c.ph === "carry") {
