@@ -960,7 +960,7 @@ function buildEntries(world, M) {
     const inSign = horiz ? D.dir[1] : D.dir[0]; // +1 when local +z points into the room
     const hinge = makeDoor(g, M.door);
     const openRot = 1.45 * (inSign > 0 ? -1 : 1);
-    return { hinge, rot: openRot, openRot };
+    return { hinge, rot: 0, openRot };
   });
   // light switches
   W3.switches = SWITCHES.map((sw) => {
