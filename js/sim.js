@@ -1,15 +1,28 @@
 // ---------------------------------------------------------------------------
 // Rules + the host-side simulation. The host's browser runs the real game
-// (story, chores, doors, lights, the stalker) and sends snapshots to everyone.
+// (chores, doors, lights, the monster) and sends snapshots to everyone.
+//
+// One night, 9:00 PM to 6:00 AM. Do the chores on the clipboard, and a sticky
+// note with the safe's code appears on it. The safe in the laundry room holds
+// the front door key. Get out the front door to win. Something lives in the
+// bathroom wall, and it comes out to hunt. At curfew, be in bed with your eyes
+// shut (look up at the ceiling).
 // ---------------------------------------------------------------------------
 const PR = 0.3;                    // player radius (m)
-const WALK = 2.8, SPRINT = 4.4;
+const WALK = 2.6, SPRINT = 4.3;    // player speeds (m/s) before any hits
+const RAY_EYE = 1.62;              // eye height for aiming at things
+const REACH = 2.0;                 // how far away you can use things
 const FL_RANGE = 9, FL_HALF = 0.42;
-const MAX_BOARDS = 3, MAX_PLANKS = 2;
-const BED_HIDE_MAX = 30;           // seconds you can stay under a bed before you crawl out
-const BED_COOLDOWN = 45;           // then this long before you can hide under a bed again
-const NIGHT_END = 600;             // 6:00 AM, in minutes after 8:00 PM
-const LAST_NIGHT = 3;
+const MAX_STRIKES = 3;
+const STRIKE_SLOW = 0.9;           // each hit leaves you a little slower, for good
+const CHASE_RATIO = 0.92;          // he runs a little slower than you can sprint...
+const RAGE_RATIO = 1.25;           // ...unless you keep looping him around the furniture
+const RESET_RATIO = 1.5;           // ...or he already had you once tonight
+const BED_MAX = 30;                // seconds you can stay in bed (outside a curfew)
+const BED_COOLDOWN = 45;           // then this long before you can get back in
+const NIGHT_MINS = 540;            // 9:00 PM to 6:00 AM
+const NIGHT_LEN = 1500;            // real seconds the night lasts
+const CURFEWS = [75, 165, 255, 345, 435, 510]; // minutes after 9:00 PM
 const COLORS = ["#4fc3f7", "#ffb74d", "#81c784", "#f06292", "#ba68c8", "#fff176"];
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -17,45 +30,33 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 
-// ------------------------------ the nights ---------------------------------
-const NIGHTS = {
-  1: { day: "MONDAY", wake: 407, nightLen: 210, aggr: 1, eveningAggr: 0, closetPlanks: 0, nightPlanks: 4 },
-  2: { day: "TUESDAY", wake: 432, nightLen: 250, aggr: 2, eveningAggr: 0, closetPlanks: 0, nightPlanks: 10 },
-  3: { day: "WEDNESDAY", wake: 358, nightLen: 290, aggr: 3, eveningAggr: 1, closetPlanks: 16, nightPlanks: 10 },
-};
+// ------------------------------ the chores ---------------------------------
 const TASK_LABELS = {
-  eat: "Heat up a dinner from the fridge and eat it",
+  eat: "Heat up a frozen dinner and eat it at the table",
   dishes: "Wash your plate in the kitchen sink",
-  trash: "Take the trash bag out to the dumpster",
+  trash: "Take the trash out to the can in the backyard",
+  laundry: "Get the clothes from the dryer and put them in your closet",
+  bulb: "Replace the dead bathroom bulb (spares: laundry room shelf)",
   teeth: "Brush your teeth",
-  lock: "Lock the front door and put the chain on",
-  bulb: "Replace the dead bathroom bulb (spares: laundry room)",
-  laundry: "Take the clothes out of the dryer, put them in your closet",
-  batteries: "Grab spare flashlight batteries (kitchen drawer)",
-  board: "Board up 3 windows (planks: laundry room)",
-  bed: "Go to bed",
-  check: "Find out what made that noise",
-  power: "Get the power back on (fuse box, laundry room)",
-  survive: "Survive until 6:00 AM",
+  backdoor: "Lock the back door",
 };
-const EVENING_TASKS = {
-  1: ["eat", "dishes", "trash", "teeth", "lock", "bed"],
-  2: ["bulb", "eat", "dishes", "laundry", "trash", "lock", "bed"],
-  3: ["eat", "batteries", "board", "lock", "bed"],
+const CHORES = ["eat", "dishes", "trash", "laundry", "bulb", "teeth", "backdoor"];
+const ITEM_HOME = {
+  food: "the freezer", hot: "the microwave", plate: "the table", trash: "the kitchen can", bulb: "the shelf",
+  laundry: "the dryer", clipboard: "the counter", key: "the safe", batteries: "where you found them",
 };
-const NIGHT_TASKS = { 1: ["check", "survive"], 2: ["power", "survive"], 3: ["survive"] };
 
 // ------------------------------ geometry -----------------------------------
 function doorOpen(S, tx, ty) {
   const c = tileAt(tx, ty), k = tx + "," + ty;
   if (c === "d") return S.idoors[IDOOR_AT[k]].open;
-  if (c === "D" || c === "B") { const e = S.entries[ENTRY_AT[k]]; return e.open || e.broken; }
+  if (c === "D") { const e = S.entries[ENTRY_AT[k]]; return e.open || e.broken; }
   return false;
 }
 function playerPass(S, tx, ty) {
   const c = tileAt(tx, ty);
   if (c === "." || c === "a" || c === "y") return true;
-  if (c === "d" || c === "D" || c === "B") return doorOpen(S, tx, ty);
+  if (c === "d" || c === "D") return doorOpen(S, tx, ty);
   return false;
 }
 function playerSolidFn(S) { return (tx, ty) => !playerPass(S, tx, ty); }
@@ -80,11 +81,10 @@ function moveCircle(o, dx, dy, r, solid) {
   }
 }
 
-// Does this tile block sight? Closed doors and boarded windows (2+ boards) do.
+// Does this tile block sight? Walls, tall furniture and closed doors do.
 function opaqueAt(S, tx, ty) {
   const c = tileAt(tx, ty);
-  if (c === "W") return S.entries[ENTRY_AT[tx + "," + ty]].boards >= 2;
-  if (c === "d" || c === "D" || c === "B") return !doorOpen(S, tx, ty);
+  if (c === "d" || c === "D") return !doorOpen(S, tx, ty);
   return c === "#" || c === "F" || c === "C" || c === "L" || c === "r";
 }
 
@@ -102,7 +102,9 @@ function los(S, x0, y0, x1, y1) {
   return true;
 }
 
-function flashOn(p) { return p.fl && p.bat > 0 && !p.down && !p.hidden; }
+// your flashlight is in your left hand; it goes away while your phone is out
+function flashOn(p) { return p.fl && !p.ph && p.bat > 0 && !p.down && !p.hidden && !p.cut && !p.escaped; }
+function active(p) { return !p.down && !p.escaped && !p.cut; }
 
 function flashHits(S, p, x, y) {
   if (!flashOn(p)) return false;
@@ -110,8 +112,7 @@ function flashHits(S, p, x, y) {
   if (d > FL_RANGE) return false;
   const slack = 0.35 / Math.max(d, 0.5);
   if (Math.abs(angDiff(Math.atan2(dy, dx), p.a)) > FL_HALF + slack) return false;
-  // his head is ~0.3 m above your flashlight; aiming at the floor or ceiling misses
-  if (Math.abs((p.pt || 0) - Math.atan2(0.3, d)) > FL_HALF + slack + 0.15) return false;
+  if (Math.abs((p.pt || 0) - Math.atan2(0.4, d)) > FL_HALF + slack + 0.15) return false;
   return los(S, p.x, p.y, x, y);
 }
 
@@ -140,9 +141,9 @@ function bfs(sx, sy, gx, gy, pass) {
   return path.reverse();
 }
 
-// minutes after 8:00 PM -> "11:42 PM"
+// minutes after 9:00 PM -> "11:42 PM"
 function clockText(mins) {
-  const total = (20 * 60 + Math.floor(mins)) % (24 * 60);
+  const total = (21 * 60 + Math.floor(mins)) % (24 * 60);
   const h24 = Math.floor(total / 60), m = total % 60;
   const h = h24 % 12 === 0 ? 12 : h24 % 12;
   return h + ":" + String(m).padStart(2, "0") + (h24 >= 12 ? " PM" : " AM");
@@ -156,12 +157,13 @@ function roomLit(S, x, y) {
 }
 function inYard(x, y) { return tileAt(Math.floor(x), Math.floor(y)) === "y"; }
 function inHouse(x, y) { return insideApt(Math.floor(x), Math.floor(y)); }
+function nightProgress(S) { return clamp(S.mins / NIGHT_MINS, 0, 1); }
 
 // ------------------------------ chores --------------------------------------
 function task(S, id) { return S.tasks.find((t) => t.id === id); }
 function hasTask(S, id) { const t = task(S, id); return !!t && !t.done; }
 function taskDone(S, id) { const t = task(S, id); return !!t && t.done; }
-function choresDone(S) { return S.tasks.every((t) => t.done || t.id === "bed"); }
+function choresDone(S) { return S.tasks.every((t) => t.done); }
 function completeTask(S, id) {
   const t = task(S, id);
   if (!t || t.done) return;
@@ -172,66 +174,97 @@ function completeTask(S, id) {
   emit({ k: "task", text: t.label });
 }
 
-// What can player p interact with right now? Used by the host (to do it) and
-// by every client (to show the prompt). Returns {e, q} actions or null.
-function allSpots(S, p) {
-  const spots = [];
-  const consider = (spot, d) => {
-    if (!spot || (!spot.e && !spot.q)) return;
-    const da = Math.abs(angDiff(Math.atan2(spot.ty - p.y, spot.tx - p.x), p.a));
-    const can = (spot.e && spot.e.can) || (spot.q && spot.q.can);
-    spot.score = d + da * 0.35 + (can ? 0 : 0.3);
-    spots.push(spot);
-  };
-  for (const q of Object.values(S.players)) {
-    if (q.id === p.id || !q.down) continue;
-    const d = Math.hypot(q.x - p.x, q.y - p.y);
-    if (d < 1.6) consider({ tx: q.x, ty: q.y, e: { key: "rv:" + q.id, kind: "revive", ref: q.id, label: "Help " + q.name + " up", dur: 2.5, can: true } }, d - 0.5);
-  }
-  SWITCHES.forEach((sw, i) => {
-    const d = Math.hypot(sw.px - p.x, sw.py - p.y);
-    if (d > 0.9) return;
-    const r = S.rooms[sw.room], name = ROOM_BY_ID[sw.room].name;
-    consider({ tx: sw.x, ty: sw.y, e: { key: "sw" + i, kind: "switch", ref: sw.room, label: (r.on ? "Turn off the " : "Turn on the ") + name.toLowerCase() + " light", dur: 0.15, can: true } }, d - 0.3);
-  });
-  // replacing a dead bulb: stand under the light
-  if (p.carry === "bulb") {
-    for (const r of ROOMS) {
-      if (S.rooms[r.id].bulb) continue;
-      for (const [lx, ly] of r.lights) {
-        const d = Math.hypot(lx - p.x, ly - p.y);
-        if (d < 1.4) consider({ tx: lx, ty: ly, e: { key: "bulb" + r.id, kind: "bulbPut", ref: r.id, label: "Screw in the new light bulb", dur: 2, can: true } }, d - 0.6);
-      }
-    }
-  }
-  // the hole in the bathroom wall
-  const hd = Math.hypot(SPOTS.hole.x - p.x, SPOTS.hole.y - p.y);
-  if (hd < 1.2) consider({ tx: SPOTS.hole.x, ty: SPOTS.hole.y, e: doAct("hole", "peek", S.night >= 2 ? "Look through the hole in the wall" : "Look at the crack in the wall", 0.6) }, hd - 0.4);
-  const cx = Math.floor(p.x), cy = Math.floor(p.y);
-  for (let ty = cy - 2; ty <= cy + 2; ty++) for (let tx = cx - 2; tx <= cx + 2; tx++) {
-    const c = tileAt(tx, ty);
-    if ("dDWrMTSgZzoLAwCbvhFH".indexOf(c) < 0) continue;
-    const nx = clamp(p.x, tx, tx + 1), ny = clamp(p.y, ty, ty + 1);
-    const d = Math.hypot(p.x - nx, p.y - ny);
-    if (d > 0.85) continue;
-    const spot = tileSpot(S, p, c, tx, ty);
-    if (spot) { spot.tx = tx + 0.5; spot.ty = ty + 0.5; consider(spot, d); }
-  }
-  return spots;
+// --------------------------- aiming at things -------------------------------
+// You have to look right at something to use it: a ray goes out from your eyes.
+const OBJ_H = {
+  b: [0, 0.75], n: [0, 0.95], C: [0, 2.25], e: [0, 1.0], u: [0, 0.62], z: [0, 1.5], o: [0, 0.8], w: [0, 1.08],
+  L: [0, 2.0], v: [0, 1.5], H: [0, 0.62], c: [0, 0.5], s: [0, 0.95], h: [0, 0.95], g: [0, 0.72], A: [0, 1.0],
+  S: [0, 1.0], O: [0, 1.0], M: [0, 1.25], r: [0, 1.9], T: [0, 0.8], K: [0, 0.9], Z: [0, 1.1], d: [0, 2.15], D: [0, 2.15],
+};
+function eyeOf(p) {
+  if (p.hidden === "bed") return { x: p.hideX, y: p.hideY, h: 0.75 };
+  return { x: p.x, y: p.y, h: RAY_EYE };
 }
+// small things you can aim at that aren't a whole tile
+function pointTargets(S, p) {
+  const pts = [];
+  SWITCHES.forEach((sw, i) => pts.push({ type: "sw", i, x: sw.x, y: sw.y, h: 1.2, r: 0.17 }));
+  if (p.carry === "bulb") for (const r of ROOMS) if (!S.rooms[r.id].bulb) for (const [lx, ly] of r.lights) pts.push({ type: "bulb", room: r.id, x: lx, y: ly, h: 2.5, r: 0.4 });
+  pts.push({ type: "hole", x: SPOTS.hole.x, y: SPOTS.hole.y, h: 1.05, r: 0.3 });
+  S.batts.forEach((b, i) => { if (b.here) pts.push({ type: "batt", i, x: b.x, y: b.y, h: b.h + 0.04, r: 0.16 }); });
+  if (S.clip === "counter") pts.push({ type: "clip", x: SPOTS.clipboard.x, y: SPOTS.clipboard.y, h: SPOTS.clipboard.h, r: 0.2 });
+  return pts;
+}
+function rayHit(S, p) {
+  const e = eyeOf(p), pt = p.pt || 0;
+  const dx = Math.cos(p.a) * Math.cos(pt), dy = Math.sin(p.a) * Math.cos(pt), dz = Math.sin(pt);
+  const pts = pointTargets(S, p);
+  let tileHit = null;
+  for (let d = 0.12; d <= REACH; d += 0.04) {
+    // once the ray reaches a piece of furniture, look a little further for small things lying on it
+    if (tileHit && d > tileHit.d + 0.7) break;
+    const x = e.x + dx * d, y = e.y + dy * d, h = e.h + dz * d;
+    if (h < 0 || h > 2.62) break;
+    for (const sp of pts) if ((x - sp.x) ** 2 + (y - sp.y) ** 2 + (h - sp.h) ** 2 < sp.r * sp.r) return { ref: { pt: sp }, d };
+    const tx = Math.floor(x), ty = Math.floor(y), c = tileAt(tx, ty);
+    if (c === "#" || c === "W" || c === "F") {
+      // the fuse box hangs on the laundry room wall
+      if (!tileHit && c === "F" && h > 0.85 && h < 1.6) tileHit = { ref: { tx, ty }, d };
+      break;
+    }
+    if (tileHit) continue;
+    const rng = OBJ_H[c];
+    if (!rng || h < rng[0] || h > rng[1]) continue; // nothing here, or looking over it
+    if ((c === "d" || c === "D") && doorOpen(S, tx, ty) && d > 1.3) continue; // looking through an open doorway
+    tileHit = { ref: { tx, ty }, d };
+  }
+  return tileHit;
+}
+
+// What does player p have in their sights? Returns {e, q, tx, ty, ref} or null.
 function findTarget(S, p) {
-  let best = null;
-  for (const s of allSpots(S, p)) if (!best || s.score < best.score) best = s;
-  return best;
+  if (!active(p) || p.stun > 0 || p.hidden) return null;
+  const hit = rayHit(S, p);
+  return hit ? spotFor(S, p, hit.ref) : null;
+}
+function spotFor(S, p, ref) {
+  let spot = null;
+  if (ref.pt) {
+    spot = pointSpot(S, p, ref.pt);
+    if (spot) { spot.tx = ref.pt.x; spot.ty = ref.pt.y; }
+  } else {
+    spot = tileSpot(S, p, tileAt(ref.tx, ref.ty), ref.tx, ref.ty);
+    if (spot) { spot.tx = ref.tx + 0.5; spot.ty = ref.ty + 0.5; }
+  }
+  if (spot) spot.ref = ref;
+  return spot;
 }
 // is this particular action still within reach? (lets a started action keep going)
-function findAction(S, p, key, which) {
-  for (const s of allSpots(S, p)) { const a = s[which]; if (a && a.key === key && a.can) return { a, spot: s }; }
-  return null;
+function findAction(S, p, act) {
+  if (!active(p) || p.hidden) return null;
+  const spot = spotFor(S, p, act.ref);
+  if (!spot || Math.hypot(spot.tx - p.x, spot.ty - p.y) > REACH + 0.6) return null;
+  const a = spot[act.which];
+  return a && a.key === act.key && a.can ? { a, spot } : null;
 }
 
 const doAct = (key, kind, label, dur, ref) => ({ key, kind, label, dur, ref, can: true });
 const noteAct = (key, label) => ({ key, label, can: false });
+
+function pointSpot(S, p, sp) {
+  const empty = !p.carry;
+  switch (sp.type) {
+    case "sw": {
+      const sw = SWITCHES[sp.i], r = S.rooms[sw.room], name = ROOM_BY_ID[sw.room].name;
+      return { e: doAct("sw" + sp.i, "switch", (r.on ? "Turn off the " : "Turn on the ") + name.toLowerCase() + " light", 0.15, sw.room) };
+    }
+    case "bulb": return { e: doAct("bulb" + sp.room, "bulbPut", "Screw in the new light bulb", 2, sp.room) };
+    case "hole": return { e: doAct("hole", "peek", "Look through the hole in the wall", 0.6) };
+    case "batt": return { e: empty ? doAct("bt" + sp.i, "battUp", "Pick up the batteries", 0.3, sp.i) : noteAct("bt" + sp.i, "Batteries — your hands are full") };
+    case "clip": return { e: empty ? doAct("clip", "clipUp", "Pick up the clipboard (your chores)", 0.3) : noteAct("clip", "The clipboard — your hands are full") };
+  }
+  return null;
+}
 
 function tileSpot(S, p, c, tx, ty) {
   const k = tx + "," + ty, empty = !p.carry;
@@ -242,26 +275,17 @@ function tileSpot(S, p, c, tx, ty) {
     }
     case "D": {
       const i = ENTRY_AT[k], e = S.entries[i], E = ENTRIES[i], nm = E.name.toLowerCase();
-      const out = inYard(p.x, p.y);
-      if (p.carry === "plank" && !out) {
-        if (e.open) return { e: noteAct("e" + i, "Close the door before boarding it up") };
-        if (e.boards >= MAX_BOARDS) return { e: noteAct("e" + i, E.name + " — fully boarded") };
-        return { e: doAct("e" + i, "board", (e.broken ? "Patch up the " : "Board up the ") + nm + " (" + e.boards + "/" + MAX_BOARDS + ")", 1.6, i) };
-      }
       if (e.broken) return { e: noteAct("e" + i, "The " + nm + " has been smashed in") };
-      if (e.boards > 0) return { e: noteAct("e" + i, "The " + nm + " is boarded up") };
+      if (i === FRONT_DOOR && !S.unlocked) {
+        if (p.carry === "key") return { e: doAct("unlock", "unlock", "Unlock the front door with the key", 1.4, i) };
+        return { e: noteAct("e" + i, "The front door is locked. The key is in the laundry room safe.") };
+      }
       const spot = {};
       if (e.open) spot.e = doAct("e" + i, "edoor", "Close the " + nm, 0.25, i);
-      else if (e.locked) spot.e = noteAct("e" + i, "Locked" + (out ? "" : " — press Q to unlock"));
-      else spot.e = doAct("e" + i, "edoor", "Open the " + nm, 0.25, i);
-      if (!e.open && !out) spot.q = doAct("l" + i, "lock", e.locked ? "Take the chain off and unlock" : "Lock it and put the chain on", 0.6, i);
+      else if (e.locked) spot.e = noteAct("e" + i, "Locked" + (inHouse(p.x, p.y) ? " — press Q to unlock" : ""));
+      else spot.e = doAct("e" + i, "edoor", i === FRONT_DOOR ? "Open the front door and get out" : "Open the " + nm, 0.25, i);
+      if (i === BACK_DOOR && !e.open && inHouse(p.x, p.y)) spot.q = doAct("l" + i, "lock", e.locked ? "Unlock the back door" : "Lock the back door", 0.5, i);
       return spot;
-    }
-    case "W": {
-      if (p.carry !== "plank") return null;
-      const i = ENTRY_AT[k], e = S.entries[i], E = ENTRIES[i];
-      if (e.boards >= MAX_BOARDS) return { e: noteAct("e" + i, E.name + " — fully boarded") };
-      return { e: doAct("e" + i, "board", (e.broken ? "Patch up the " : "Board up the ") + E.name.toLowerCase() + " (" + e.boards + "/" + MAX_BOARDS + ")", 1.6, i) };
     }
     case "r":
       return { e: empty ? doAct("fridge", "food", "Take a frozen dinner", 0.6) : noteAct("fridge", "Your hands are full") };
@@ -271,36 +295,38 @@ function tileSpot(S, p, c, tx, ty) {
       if (p.carry === "food") return { e: doAct("micro", "microIn", "Heat it up in the microwave", 0.6) };
       return { e: noteAct("micro", "Microwave") };
     case "T":
-      if (p.carry === "hot") return { e: doAct("table", "eat", "Sit down and eat", 4) };
+      if (p.carry === "hot") return { e: doAct("table", "eat", "Sit down and eat", 5) };
       if (S.plateOnTable && empty) return { e: doAct("table", "plate", "Pick up your dirty plate", 0.4) };
       return null;
     case "S":
       if (p.carry === "plate") return { e: doAct("sink", "wash", "Wash your plate", 3.5) };
-      return null;
+      return { e: noteAct("sink", "Kitchen sink") };
+    case "A":
+      if (p.carry === "clipboard") return { e: doAct("clip", "clipDown", "Put the clipboard down", 0.3) };
+      if (S.clip === "counter") return { e: empty ? doAct("clip", "clipUp", "Pick up the clipboard (your chores)", 0.3) : noteAct("clip", "The clipboard — your hands are full") };
+      return { e: noteAct("counter", "Kitchen counter") };
     case "g":
       if (S.trash === "can") return { e: empty ? doAct("can", "trashUp", "Tie up the trash bag and take it", 0.8) : noteAct("can", "Your hands are full") };
       return null;
     case "Z":
-      if (p.carry === "trash") return { e: doAct("bin", "trashBin", "Throw the bag in the bin", 0.6) };
-      return null;
+      if (p.carry === "trash") return { e: doAct("bin", "trashBin", "Throw the bag in the trash can", 0.6) };
+      return { e: noteAct("bin", "Trash can") };
     case "z":
       if (hasTask(S, "teeth")) return { e: doAct("bsink", "teeth", "Brush your teeth", 3) };
-      return null;
+      return { e: noteAct("bsink", "Bathroom sink") };
     case "o":
       return { e: doAct("toilet", "flush", "Flush the toilet", 0.3) };
     case "L": {
-      const spot = {};
-      const wantBulb = Object.values(S.rooms).some((r) => !r.bulb) && S.closet.bulbs > 0 && empty;
-      const plankOk = S.closet.planks > 0 && (empty || (p.carry === "plank" && p.carryN < MAX_PLANKS));
-      if (wantBulb) spot.e = doAct("closetB", "bulbTake", "Take a light bulb", 0.6);
-      if (plankOk) spot[spot.e ? "q" : "e"] = doAct("closetP", "plankTake", "Take a plank (" + S.closet.planks + " left)", 0.5);
-      if (!spot.e) spot.e = noteAct("closet", S.closet.planks <= 0 && S.stage === "night" ? "Supply shelf — no planks left" : "Supply shelf — detergent and old junk");
-      return spot;
+      const want = Object.values(S.rooms).some((r) => !r.bulb);
+      if (want && S.shelf.bulbs > 0) return { e: empty ? doAct("shelf", "bulbTake", "Take a light bulb", 0.6) : noteAct("shelf", "Your hands are full") };
+      return { e: noteAct("shelf", "Supply shelf — detergent and old junk") };
     }
-    case "A":
-      if (S.batteries <= 0) return { e: noteAct("drawer", "Junk drawer — no batteries left") };
-      if (p.bat >= 95 && !hasTask(S, "batteries")) return { e: noteAct("drawer", "Junk drawer (your flashlight is full)") };
-      return { e: doAct("drawer", "batt", "Take flashlight batteries", 0.8) };
+    case "K": {
+      if (!S.safe.open) return { e: doAct("safe", "keypad", "Type in the safe's code", 0.2) };
+      if (S.safe.key === "safe") return { e: empty ? doAct("safe", "keyUp", "Take the front door key", 0.5) : noteAct("safe", "The key — your hands are full") };
+      if (p.carry === "key") return { e: doAct("safe", "keyDown", "Put the key back", 0.4) };
+      return { e: noteAct("safe", "The safe is empty") };
+    }
     case "w":
       if (S.laundry === "basket") return { e: empty ? doAct("dryer", "laundryUp", "Take the clean clothes out of the dryer", 0.8) : noteAct("dryer", "Your hands are full") };
       return { e: noteAct("dryer", "Washer and dryer") };
@@ -308,25 +334,31 @@ function tileSpot(S, p, c, tx, ty) {
       return { e: noteAct("chest", "An old wooden chest. It's locked.") };
     case "C": {
       if (p.carry === "laundry" && tx === SPOTS.closet.x && ty === SPOTS.closet.y) return { e: doAct("h" + k, "laundryPut", "Put the clothes away", 1.2) };
-      return { e: doAct("h" + k, "hide", "Hide in the closet", 0.35, k) };
+      return { e: doAct("h" + k, "hideCloset", "Hide in the closet", 0.35, k) };
     }
-    case "b": {
-      const hide = p.bedCD > 0
-        ? noteAct("h" + k, "Too soon to hide under the bed again (" + Math.ceil(p.bedCD) + "s)")
-        : doAct("h" + k, "hide", "Hide under the bed", 0.35, k);
-      if (S.stage === "evening" && hasTask(S, "bed")) {
-        return { e: choresDone(S) ? doAct("bed", "sleep", "Go to sleep", 1.5) : noteAct("bed", "Finish your chores before bed"), q: hide };
-      }
-      return { e: hide };
+    case "b": case "s": {
+      if (p.bedCD > 0 && !curfewOn(S)) return { e: noteAct("bed" + k, "Too soon to get back in bed (" + Math.ceil(p.bedCD) + "s)") };
+      const free = freeBedSpot(S, c);
+      if (free < 0) return { e: noteAct("bed" + k, "There's no room") };
+      return { e: doAct("bed" + k, "hideBed", c === "b" ? "Get into bed, under the blanket" : "Lie down on the couch, under the blanket", 0.5, free) };
     }
     case "v":
       return { e: doAct("tv", "tv", S.tv ? "Turn off the TV" : "Turn on the TV", 0.3) };
     case "h":
-      return S.phone > 0 ? { e: doAct("phone", "phone", "Answer the phone", 0.3) } : null;
+      return S.phone > 0 ? { e: doAct("phone", "phone", "Answer the phone", 0.3) } : { e: noteAct("phone", "The landline") };
     case "F":
       return { e: S.power ? noteAct("fuse", "Fuse box — the power is on") : doAct("fuse", "fuse", "Flip the breakers back on", 2.5) };
   }
   return null;
+}
+
+function freeBedSpot(S, c) {
+  for (let i = 0; i < BED_SPOTS.length; i++) {
+    const [tx, ty] = BED_SPOTS[i].tile.split(",").map(Number);
+    if (tileAt(tx, ty) !== c) continue;
+    if (!Object.values(S.players).some((q) => q.hidden === "bed" && q.bedSpot === i)) return i;
+  }
+  return -1;
 }
 
 // ======================= HOST SIMULATION ===================================
@@ -334,193 +366,182 @@ let emit = () => {};
 function setEmitter(f) { emit = f; }
 
 function newStalker() {
-  return { x: -30, y: -30, a: 0, mode: "out", state: "away", timer: 9999, path: [], next: null, target: -1, last: -1, bangT: 0, stun: false, expose: 0, repath: 0, lastSeen: null, seenT: 0, msg: null };
+  return {
+    x: -30, y: -30, a: 0, mode: "away", state: "away", timer: 9999, path: [], target: null, lastSeen: null,
+    repath: 0, pause: 0, wait: 0, rage: false, loop: null, lostT: 0, look: 0, checked: false, wps: [], win: -1, spd: 0,
+  };
 }
 
-function newGame(lobby, night) {
-  const S = {
-    phase: "play", night: night || 1, stage: "evening", mins: 0, stageT: 0,
-    power: true, flick: 0, tv: false, phone: 0, phoneMsg: null,
-    entries: [], idoors: [], rooms: {}, micro: { st: "off", t: 0 }, trash: "can", plateOnTable: false, laundry: "done",
-    closet: { bulbs: 2, planks: 0 }, batteries: 4, tasks: [],
-    dir: { t: 0, fired: {}, doneAt: {} },
-    players: {}, stalker: newStalker(), n: Math.max(1, lobby.length),
-    nextEvent: 9999, powerCD: 40, aggr: 0, nextTarget: -1,
+function newPlayer(L) {
+  return {
+    id: L.id, name: L.name, color: L.color, model: L.model === "m" ? "m" : "f",
+    x: 0, y: 0, a: 0, pt: 0, fl: true, ph: false, sp: false, bat: 100, carry: null, battFrom: -1,
+    hidden: false, hideX: 0, hideY: 0, hideT: 0, bedCD: 0, bedSpot: -1, seenHide: false,
+    strikes: 0, spd: 1, stun: 0, down: false, escaped: false, cut: false,
+    text: null, answer: null, snap: 0, act: null, press: {},
   };
-  lobby.forEach((L, i) => {
-    S.players[L.id] = {
-      id: L.id, name: L.name, color: L.color, x: 0, y: 0, a: 0, pt: 0, fl: true, bat: 100, carry: null, carryN: 0,
-      down: false, hidden: false, hideX: 0, hideY: 0, hideT: 0, bedCD: 0, snap: 0, act: null, seenHide: false, hamT: 0, press: {},
-    };
-  });
-  setupEvening(S);
+}
+
+function newGame(lobby) {
+  const S = {
+    phase: "play", night: 1, stage: "night", mins: 0, stageT: 0,
+    players: {}, n: Math.max(1, lobby.length), resets: 0,
+  };
+  lobby.forEach((L) => (S.players[L.id] = newPlayer(L)));
+  setupNight(S);
   return S;
 }
 
-function placePlayers(S, spots, a) {
-  Object.values(S.players).forEach((p, i) => {
-    const s = spots[i % spots.length];
-    p.x = s[0]; p.y = s[1]; p.a = a; p.snap++;
-    p.down = false; p.hidden = false; p.act = null; p.carry = null; p.carryN = 0; p.hideT = 0; p.bedCD = 0;
-  });
-}
-
-function setupEvening(S) {
-  const cfg = NIGHTS[S.night];
-  S.stage = "evening"; S.mins = 0; S.stageT = 0;
+// everything back to how it was at 9:00 PM (the start, or after he carries you back to bed)
+function setupNight(S) {
+  S.mins = 0; S.stageT = 0;
   S.power = true; S.flick = 0; S.tv = false; S.phone = 0; S.phoneMsg = null;
-  S.entries = ENTRIES.map((E) => ({ boards: 0, bhp: 100, lock: E.kind === "door" ? 100 : 55, broken: false, hit: 0, open: false, locked: false }));
+  S.entries = ENTRIES.map(() => ({ broken: false, hit: 0, open: false, locked: false }));
+  S.entries[FRONT_DOOR].locked = true;
+  S.unlocked = false;
   S.idoors = IDOORS.map(() => ({ open: false }));
   S.rooms = {};
   ROOMS.forEach((r) => (S.rooms[r.id] = { on: true, bulb: true }));
-  if (S.night === 2) S.rooms.bath.bulb = false;
-  S.micro = { st: "off", t: 0 }; S.trash = "can"; S.plateOnTable = false;
-  S.laundry = S.night === 2 ? "basket" : "done";
-  S.closet = { bulbs: 2, planks: cfg.closetPlanks }; S.batteries = 4;
-  S.tasks = EVENING_TASKS[S.night].map((id) => ({ id, label: TASK_LABELS[id], done: false }));
+  S.rooms.bath.bulb = false;
+  S.micro = { st: "off", t: 0 }; S.trash = "can"; S.plateOnTable = false; S.laundry = "basket";
+  S.shelf = { bulbs: 2 };
+  S.clip = "counter"; S.note = false;
+  S.safe = { code: String(Math.floor(1000 + Math.random() * 9000)), open: false, key: "safe" };
+  S.batts = BATTERY_SPOTS.map((b) => ({ x: b.x, y: b.y, h: b.h, here: false }));
+  for (const i of shuffled(BATTERY_SPOTS.map((b, i) => i)).slice(0, 4)) S.batts[i].here = true;
+  S.battT = 150;
+  S.tasks = CHORES.map((id) => ({ id, label: TASK_LABELS[id], done: false }));
   S.dir = { t: 0, fired: {}, doneAt: {} };
-  S.aggr = cfg.eveningAggr; S.nextTarget = -1;
-  S.stalker = newStalker();
-  if (S.aggr > 0) { S.stalker.x = 1.5; S.stalker.y = 1.5; S.stalker.state = "wander"; S.stalker.timer = 70; }
-  S.nextEvent = S.aggr > 0 ? 80 : 9999;
-  S.powerCD = 9999;
-  for (const p of Object.values(S.players)) p.bat = 100;
-  placePlayers(S, EVENING_SPOTS, -Math.PI / 2);
-}
-
-function goToSleep(S) {
-  S.stage = "sleep"; S.stageT = 0;
-  for (const p of Object.values(S.players)) { p.act = null; p.hidden = false; }
-  emit({ k: "sleep" });
-}
-
-function startNightStage(S) {
-  const cfg = NIGHTS[S.night];
-  S.stage = "night"; S.stageT = 0; S.mins = cfg.wake;
-  for (const id in S.rooms) S.rooms[id].on = false;
-  // you wake up with every door shut
-  S.idoors.forEach((d) => (d.open = false));
-  S.entries.forEach((e, i) => { if (ENTRIES[i].kind === "door" && !e.broken) e.open = false; });
-  S.tv = false; S.micro = { st: "off", t: 0 }; S.phone = 0;
-  if (S.night === 2) S.power = false;
-  S.closet.planks += cfg.nightPlanks;
-  S.tasks = NIGHT_TASKS[S.night].map((id) => ({ id, label: TASK_LABELS[id], done: false }));
-  S.dir = { t: 0, fired: {}, doneAt: {} };
-  S.aggr = cfg.aggr; S.nextTarget = -1;
+  S.curfew = { i: 0, state: "none", t: 0 };
+  S.cut = null;
   const st = S.stalker = newStalker();
-  st.x = 3.5; st.y = 27.5; st.state = "wander"; st.timer = S.night === 3 ? 8 : 30;
-  S.nextEvent = 50; S.powerCD = S.night >= 2 ? 80 : 9999;
-  placePlayers(S, WAKE_SPOTS, Math.PI / 2);
-  emit({ k: "wake" });
+  st.timer = S.resets ? 40 : 130; // seconds until he first climbs out of the wall
+  S.nextEvent = 45;
+  S.powerCD = rand(420, 600);
+  Object.values(S.players).forEach((p, i) => {
+    const s = EVENING_SPOTS[i % EVENING_SPOTS.length];
+    Object.assign(p, {
+      x: s[0], y: s[1], a: -Math.PI / 2, bat: 100, carry: null, battFrom: -1, hidden: false, hideT: 0, bedCD: 0, bedSpot: -1,
+      seenHide: false, strikes: 0, spd: 1, stun: 0, cut: false, down: false, text: null, answer: null, act: null,
+    });
+    p.snap++;
+  });
 }
-
-function startMorning(S) {
-  S.stage = "morning"; S.stageT = 0; S.mins = NIGHT_END;
-  goAway(S);
-  for (const p of Object.values(S.players)) p.act = null;
-  const lines = {
-    1: ["6:00 AM. The sun is coming up.", "Whoever it was, they're gone. The back gate is hanging open."],
-    2: ["6:00 AM. The police came by.", "They found muddy footprints under every single window.", "\"Call us if he comes back,\" they said. Your aunt gets home in two days."],
-    3: ["6:00 AM. Sirens. Red and blue light through the cracks in the boards.", "They never found him. But behind the hole in the bathroom wall, the police found a crawlspace.", "Someone had been living in it."],
-  }[S.night];
-  emit({ k: "card", title: S.night === LAST_NIGHT ? "YOU SURVIVED" : "MORNING", lines, t: 8.5 });
-  emit({ k: "morning" });
-}
-
-function nextNight(S) {
-  if (S.night >= LAST_NIGHT) { S.phase = "win"; emit({ k: "win" }); return; }
-  S.night++;
-  setupEvening(S);
-}
+function shuffled(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 
 // What clients receive (same shape as S, minus host-only bookkeeping)
 function publicState(S) {
   const players = {};
   for (const p of Object.values(S.players)) {
     players[p.id] = {
-      id: p.id, name: p.name, color: p.color, x: +p.x.toFixed(2), y: +p.y.toFixed(2), a: +p.a.toFixed(2), pt: +(p.pt || 0).toFixed(2),
-      fl: p.fl, bat: Math.round(p.bat), carry: p.carry, carryN: p.carryN, down: p.down, hidden: p.hidden, hideX: p.hideX, hideY: p.hideY,
+      id: p.id, name: p.name, color: p.color, model: p.model, x: +p.x.toFixed(2), y: +p.y.toFixed(2), a: +p.a.toFixed(2), pt: +(p.pt || 0).toFixed(2),
+      fl: p.fl, ph: p.ph, bat: Math.round(p.bat), carry: p.carry, hidden: p.hidden, hideX: p.hideX, hideY: p.hideY, bedSpot: p.bedSpot,
       hideT: p.hidden ? +p.hideT.toFixed(1) : 0, bedCD: Math.ceil(p.bedCD || 0),
-      snap: p.snap, act: p.act ? { label: p.act.label, t: p.act.t, dur: p.act.dur } : null,
+      strikes: p.strikes, spd: +p.spd.toFixed(3), stun: +p.stun.toFixed(2), down: p.down, escaped: p.escaped, cut: p.cut,
+      snap: p.snap, act: p.act ? { label: p.act.label, t: p.act.t, dur: p.act.dur, kind: p.act.kind } : null,
     };
   }
   const st = S.stalker;
   return {
-    phase: S.phase, night: S.night, stage: S.stage, mins: S.mins, stageT: S.stageT,
+    phase: S.phase, night: 1, stage: "night", mins: S.mins, stageT: S.stageT,
     power: S.power, flick: S.flick, tv: S.tv, phone: S.phone,
-    entries: S.entries.map((e) => ({ boards: e.boards, bhp: Math.round(e.bhp), lock: Math.round(e.lock), broken: e.broken, hit: e.hit, open: e.open, locked: e.locked })),
+    entries: S.entries.map((e) => ({ broken: e.broken, hit: e.hit, open: e.open, locked: e.locked })),
     idoors: S.idoors, rooms: S.rooms, micro: { st: S.micro.st, t: S.micro.t }, trash: S.trash, plateOnTable: S.plateOnTable,
-    laundry: S.laundry, closet: S.closet, batteries: S.batteries, tasks: S.tasks, aggr: S.aggr,
+    laundry: S.laundry, shelf: S.shelf, clip: S.clip, note: S.note, safe: { open: S.safe.open, key: S.safe.key },
+    code: S.note ? S.safe.code : null, unlocked: S.unlocked, batts: S.batts.map((b) => ({ x: b.x, y: b.y, h: b.h, here: b.here })), tasks: S.tasks,
+    curfew: { state: S.curfew.state, t: +S.curfew.t.toFixed(1) }, resets: S.resets,
+    cut: S.cut ? { id: S.cut.id, ph: S.cut.ph, t: +S.cut.t.toFixed(2) } : null,
     players,
-    stalker: { x: +st.x.toFixed(2), y: +st.y.toFixed(2), a: +st.a.toFixed(2), mode: st.mode, state: st.state, stun: st.stun, target: st.target },
+    stalker: { x: +st.x.toFixed(2), y: +st.y.toFixed(2), a: +st.a.toFixed(2), mode: st.mode, state: st.state, rage: st.rage, spd: +st.spd.toFixed(2), stun: false },
   };
 }
 
 function simStep(S, inputs, dt) {
   if (S.phase !== "play") return;
   S.stageT += dt;
-  if (S.stage === "sleep") { if (S.stageT > 5) startNightStage(S); return; }
-  if (S.stage === "morning") { if (S.stageT > 9) nextNight(S); return; }
   S.dir.t += dt;
-  if (S.stage === "evening") S.mins = Math.min(235, S.mins + dt / 2);
-  else {
-    const cfg = NIGHTS[S.night];
-    S.mins += dt * (NIGHT_END - cfg.wake) / cfg.nightLen;
-    if (S.mins >= NIGHT_END) { completeTask(S, "survive"); startMorning(S); return; }
-  }
+  S.mins = Math.min(NIGHT_MINS, S.mins + dt * NIGHT_MINS / NIGHT_LEN);
   S.flick = Math.max(0, S.flick - dt);
-  if (S.power) S.powerCD -= dt;
   if (S.phone > 0) S.phone = Math.max(0, S.phone - dt);
   for (const e of S.entries) e.hit = Math.max(0, e.hit - dt * 2);
   if (S.micro.st === "cooking") {
     S.micro.t -= dt;
     if (S.micro.t <= 0 || !S.power) {
-      if (S.power) { S.micro.st = "ready"; emit({ k: "ding", x: SPOTS.micro.x, y: SPOTS.micro.y }); }
-      else { S.micro.st = "ready"; }
+      S.micro.st = "ready";
+      if (S.power) emit({ k: "ding", x: SPOTS.micro.x, y: SPOTS.micro.y });
     }
   }
+  tidyOwners(S);
   updatePlayers(S, inputs, dt);
-  updateStalker(S, dt);
+  if (S.cut) updateCutscene(S, dt);
+  else updateStalker(S, dt);
+  updateCurfew(S, dt);
   runDirector(S);
   updateEvents(S, dt);
+  updateBatteries(S, dt);
   updateTasks(S);
+  checkEnd(S);
+}
+
+// someone left the game while holding something: put it back
+function tidyOwners(S) {
   const ps = Object.values(S.players);
-  if (ps.length && ps.every((p) => p.down)) { S.phase = "lose"; emit({ k: "lose" }); }
+  if (S.clip !== "counter" && !ps.some((p) => p.carry === "clipboard")) S.clip = "counter";
+  if (S.safe.key === "carried" && !ps.some((p) => p.carry === "key")) S.safe.key = "safe";
+  if (S.trash === "carried" && !ps.some((p) => p.carry === "trash")) S.trash = "can";
+  if (S.laundry === "carried" && !ps.some((p) => p.carry === "laundry")) S.laundry = "basket";
+}
+
+function checkEnd(S) {
+  const ps = Object.values(S.players);
+  if (!ps.length) return;
+  const escaped = ps.some((p) => p.escaped);
+  const left = ps.filter((p) => !p.down && !p.escaped);
+  if (!left.length) { S.phase = escaped ? "win" : "lose"; emit({ k: S.phase }); return; }
+  if (S.mins >= NIGHT_MINS && !S.cut) {
+    S.phase = escaped ? "win" : "lose";
+    if (!escaped) emit({ k: "card", title: "6:00 AM", lines: ["Curfew's over.", "So are you."], t: 6 });
+    emit({ k: S.phase });
+  }
 }
 
 function updateTasks(S) {
-  const lockT = task(S, "lock");
+  const lockT = task(S, "backdoor");
   if (lockT) {
-    const f = S.entries[FRONT_DOOR];
-    const now = (f.locked && !f.open) || f.boards > 0;
-    if (now && !lockT.done) completeTask(S, "lock");
+    const b = S.entries[BACK_DOOR];
+    const now = b.locked && !b.open && !b.broken;
+    if (now && !lockT.done) completeTask(S, "backdoor");
     else if (!now && lockT.done) lockT.done = false;
   }
-  const boardT = task(S, "board");
-  if (boardT) {
-    const n = S.entries.filter((e, i) => ENTRIES[i].kind === "window" && e.boards > 0).length;
-    boardT.label = TASK_LABELS.board + " — " + Math.min(3, n) + "/3";
-    if (n >= 3) completeTask(S, "board");
+  if (!S.note && choresDone(S)) {
+    S.note = true;
+    emit({ k: "note" });
+    emit({ k: "msg", text: "All your chores are done. A sticky note just appeared on the clipboard...", c: "#ffe082", big: true });
   }
-  if (hasTask(S, "power") && S.power && S.stageT > 2) completeTask(S, "power");
-  if (hasTask(S, "check")) {
-    if (Object.values(S.players).some((p) => !p.down && (roomAt(Math.floor(p.x), Math.floor(p.y)) || {}).id === "living") || S.dir.t > 40) completeTask(S, "check");
-  }
+}
+
+function updateBatteries(S, dt) {
+  S.battT -= dt;
+  if (S.battT > 0) return;
+  S.battT = 150;
+  const free = S.batts.map((b, i) => i).filter((i) => !S.batts[i].here && !Object.values(S.players).some((p) => p.carry === "batteries" && p.battFrom === i));
+  if (S.batts.filter((b) => b.here).length < 3 && free.length) S.batts[pick(free)].here = true;
 }
 
 function updatePlayers(S, inputs, dt) {
   const solid = playerSolidFn(S);
   for (const p of Object.values(S.players)) {
     const inp = inputs[p.id];
-    if (inp) {
-      if (!p.down && !p.hidden && typeof inp.x === "number") {
+    p.stun = Math.max(0, p.stun - dt);
+    if (inp && active(p)) {
+      if (!p.hidden && p.stun <= 0 && typeof inp.x === "number") {
         const d = Math.hypot(inp.x - p.x, inp.y - p.y);
         if (d < 2.5 && !collides(inp.x, inp.y, PR - 0.05, solid)) { p.x = inp.x; p.y = inp.y; }
         else if (d > 0.001) p.snap++;
       }
       if (typeof inp.a === "number") p.a = inp.a;
-      if (typeof inp.pt === "number") p.pt = clamp(inp.pt, -1.4, 1.4);
-      p.fl = !!inp.fl;
+      if (typeof inp.pt === "number") p.pt = clamp(inp.pt, -1.5, 1.5);
+      p.fl = !!inp.fl; p.ph = !!inp.ph; p.sp = !!inp.sp;
     }
     p.press = p.press || {};
     const pressed = (k) => {
@@ -529,71 +550,122 @@ function updatePlayers(S, inputs, dt) {
       p.press[k] = inp[k];
       return last !== undefined && inp[k] !== last;
     };
-    const pe = pressed("ep"), pq = pressed("qp"), pg = pressed("gp");
-    if (pg && p.carry && !p.down) dropItem(S, p);
+    const pe = pressed("ep"), pq = pressed("qp"), pg = pressed("gp"), pr = pressed("rl"), prep = pressed("rp"), psc = pressed("sc");
+    if (!active(p)) { p.act = null; continue; }
     if (flashOn(p)) p.bat = Math.max(0, p.bat - dt * 0.45);
     if (p.bedCD > 0) p.bedCD = Math.max(0, p.bedCD - dt);
-    if (p.down) { p.act = null; continue; }
+    // texts from him: answer one, or he comes looking
+    if (p.text) {
+      p.text.t += dt;
+      if (prep && inp && p.text.opts) {
+        const i = inp.rc === 1 ? 1 : 0;
+        p.answer = { t: 1.6, text: p.text.ans ? p.text.ans[i] : null };
+        p.text = null;
+      } else if (p.text.t > 14) {
+        p.text = null;
+        sendText(S, p, { text: "ignoring me? fine. i'll come to you." });
+        investigate(S, p.x, p.y);
+      }
+    }
+    if (p.answer) { p.answer.t -= dt; if (p.answer.t <= 0) { const a = p.answer.text; p.answer = null; if (a) sendText(S, p, { text: a }); } }
+    if (psc && inp && typeof inp.sv === "string") tryCode(S, p, inp.sv);
+    if (pr && p.carry === "batteries") {
+      p.bat = 100; p.carry = null; p.battFrom = -1;
+      emit({ k: "click", x: p.x, y: p.y });
+      emit({ k: "msg", to: p.id, text: "Fresh batteries. Your flashlight is full again.", c: "#ffe082" });
+    }
+    if (pg && p.carry) dropItem(S, p, true);
+    if (inCourtyard(p.x, p.y)) { escape(S, p); continue; }
     if (p.hidden) {
-      p.hideT += dt;
-      // no camping under the bed all night
-      if (underBed(p) && p.hideT >= BED_HIDE_MAX) {
-        leaveHiding(p);
-        emit({ k: "msg", to: p.id, text: "Your legs are cramping. You crawl out from under the bed.", c: "#ffb74d" });
+      if (!curfewOn(S)) p.hideT += dt;
+      // no camping in bed all night
+      if (p.hidden === "bed" && p.hideT >= BED_MAX && !curfewOn(S)) {
+        leaveHiding(S, p);
+        emit({ k: "msg", to: p.id, text: "You can't stay in bed forever. You get up.", c: "#ffb74d" });
         continue;
       }
     }
     if (pe || pq) {
-      if (p.hidden) { leaveHiding(p); continue; }
+      if (p.hidden) { leaveHiding(S, p); continue; }
       const which = pe ? "e" : "q";
       const spot = findTarget(S, p);
       const a = spot && spot[which];
-      if (a && a.can && !(p.act && p.act.key === a.key)) p.act = { key: a.key, label: a.label, t: 0, dur: a.dur, which };
+      if (a && a.can && !(p.act && p.act.key === a.key)) p.act = { key: a.key, kind: a.kind, label: a.label, t: 0, dur: a.dur, which, ref: spot.ref };
     }
     if (p.act) {
       // keeps going on its own; walking away cancels it
-      const f = findAction(S, p, p.act.key, p.act.which);
+      const f = findAction(S, p, p.act);
       if (!f) { p.act = null; continue; }
       p.act.t += dt;
-      if (f.a.kind === "board") {
-        p.hamT -= dt;
-        if (p.hamT <= 0) { p.hamT = 0.38; emit({ k: "hammer", x: f.spot.tx, y: f.spot.ty }); }
-      }
       if (p.act.t >= p.act.dur) { completeAction(S, p, f.a, f.spot); p.act = null; }
     }
   }
 }
 
-function underBed(p) { return p.hidden && tileAt(Math.floor(p.hideX), Math.floor(p.hideY)) === "b"; }
-function leaveHiding(p) {
-  if (underBed(p)) p.bedCD = BED_COOLDOWN;
-  p.hidden = false; p.seenHide = false; p.act = null; p.hideT = 0;
-  emit({ k: "creak", x: p.hideX, y: p.hideY, soft: true });
+function escape(S, p) {
+  if (p.escaped) return;
+  p.escaped = true; p.hidden = false; p.act = null; p.text = null;
+  if (p.carry) dropItem(S, p);
+  emit({ k: "escaped", id: p.id, name: p.name });
 }
 
-function dropItem(S, p) {
+function curfewOn(S) { return S.curfew.state !== "none"; }
+function eyesShut(p) { return p.hidden === "bed" && (p.pt || 0) > 0.9; }
+
+function leaveHiding(S, p) {
+  if (p.hidden === "bed") {
+    p.bedCD = BED_COOLDOWN;
+    const bs = BED_SPOTS[p.bedSpot];
+    if (bs) { const out = standNear(S, bs.x, bs.y); p.x = out.x; p.y = out.y; p.snap++; }
+  }
+  emit({ k: "creak", x: p.hideX, y: p.hideY, soft: true });
+  p.hidden = false; p.seenHide = false; p.act = null; p.hideT = 0; p.bedSpot = -1;
+}
+// a free floor spot next to a piece of furniture
+function standNear(S, x, y) {
+  let best = null, bd = 1e9;
+  for (let ty = Math.floor(y) - 2; ty <= Math.floor(y) + 2; ty++) for (let tx = Math.floor(x) - 2; tx <= Math.floor(x) + 2; tx++) {
+    const c = tileAt(tx, ty);
+    if (c !== "." && c !== "a") continue;
+    const d = Math.hypot(tx + 0.5 - x, ty + 0.5 - y);
+    if (d < bd) { bd = d; best = { x: tx + 0.5, y: ty + 0.5 }; }
+  }
+  return best || { x, y };
+}
+
+function dropItem(S, p, say) {
   const what = p.carry;
   switch (what) {
     case "food": break; // back in the freezer
     case "hot": S.micro.st = "ready"; break;
     case "plate": S.plateOnTable = true; break;
     case "trash": S.trash = "can"; break;
-    case "bulb": S.closet.bulbs++; break;
+    case "bulb": S.shelf.bulbs++; break;
     case "laundry": S.laundry = "basket"; break;
-    case "plank": S.closet.planks += p.carryN; break;
+    case "clipboard": S.clip = "counter"; break;
+    case "key": S.safe.key = "safe"; break;
+    case "batteries": if (S.batts[p.battFrom]) S.batts[p.battFrom].here = true; break;
   }
-  p.carry = null; p.carryN = 0;
-  emit({ k: "msg", to: p.id, text: "You put it back where you found it.", c: "#b0bec5" });
+  p.carry = null; p.battFrom = -1;
+  if (say && what) emit({ k: "msg", to: p.id, text: "You put it back (" + ITEM_HOME[what] + ").", c: "#b0bec5" });
 }
 
 function occupied(S, tx, ty) {
   const st = S.stalker;
-  if (Math.floor(st.x) === tx && Math.floor(st.y) === ty) return true;
-  return Object.values(S.players).some((q) => Math.abs(q.x - (tx + 0.5)) < 0.5 + PR && Math.abs(q.y - (ty + 0.5)) < 0.5 + PR);
+  if (st.mode === "in" && Math.floor(st.x) === tx && Math.floor(st.y) === ty) return true;
+  return Object.values(S.players).some((q) => active(q) && !q.hidden && Math.abs(q.x - (tx + 0.5)) < 0.5 + PR && Math.abs(q.y - (ty + 0.5)) < 0.5 + PR);
+}
+
+function tryCode(S, p, code) {
+  if (S.safe.open || Math.hypot(p.x - SPOTS.safe.x, p.y - SPOTS.safe.y) > REACH + 1) return;
+  if (code === S.safe.code) {
+    S.safe.open = true;
+    emit({ k: "safe", x: SPOTS.safe.x, y: SPOTS.safe.y });
+    emit({ k: "msg", text: p.name + " opened the safe. The front door key is inside!", c: "#ffe082", big: true });
+  } else emit({ k: "safeNo", to: p.id, x: SPOTS.safe.x, y: SPOTS.safe.y });
 }
 
 function completeAction(S, p, a, spot) {
-  const st = S.stalker;
   const at = { x: spot.tx, y: spot.ty };
   switch (a.kind) {
     case "idoor": {
@@ -604,14 +676,11 @@ function completeAction(S, p, a, spot) {
       break;
     }
     case "edoor": {
-      const e = S.entries[a.ref], E = ENTRIES[a.ref];
-      if (e.open && occupied(S, E.x, E.y)) { emit({ k: "msg", to: p.id, text: "Something's in the way.", c: "#b0bec5" }); return; }
+      const e = S.entries[a.ref];
+      if (e.open && occupied(S, ENTRIES[a.ref].x, ENTRIES[a.ref].y)) { emit({ k: "msg", to: p.id, text: "Something's in the way.", c: "#b0bec5" }); return; }
       e.open = !e.open;
       emit({ k: "creak", x: at.x, y: at.y, heavy: true });
-      if (e.open && a.ref === FRONT_DOOR && S.dir.fired.knock && !S.dir.fired.nobody) {
-        S.dir.fired.nobody = true;
-        emit({ k: "msg", text: "Nobody's there.", c: "#b0bec5" });
-      }
+      if (a.ref === FRONT_DOOR && e.open) emit({ k: "msg", text: "The front door is open! GET OUT!", c: "#a5d6a7", big: true });
       break;
     }
     case "lock": {
@@ -620,16 +689,13 @@ function completeAction(S, p, a, spot) {
       emit({ k: "lock", x: at.x, y: at.y });
       break;
     }
-    case "board": {
-      if (p.carry !== "plank") return;
-      const e = S.entries[a.ref];
-      p.carryN--; if (p.carryN <= 0) { p.carry = null; p.carryN = 0; }
-      if (e.broken) { e.broken = false; e.lock = 40; e.open = false; }
-      e.boards = Math.min(MAX_BOARDS, e.boards + 1);
-      e.bhp = 100;
-      emit({ k: "nail", x: at.x, y: at.y });
+    case "unlock":
+      if (p.carry !== "key") return;
+      p.carry = null; S.unlocked = true; S.safe.key = "door";
+      S.entries[FRONT_DOOR].locked = false;
+      emit({ k: "lock", x: at.x, y: at.y });
+      emit({ k: "msg", text: p.name + " unlocked the front door!", c: "#a5d6a7", big: true });
       break;
-    }
     case "food": p.carry = "food"; emit({ k: "fridge", x: at.x, y: at.y }); break;
     case "microIn": p.carry = null; S.micro = { st: "cooking", t: 8 }; emit({ k: "micro", x: at.x, y: at.y }); break;
     case "microOut": p.carry = "hot"; S.micro.st = "off"; emit({ k: "grab", x: at.x, y: at.y }); break;
@@ -641,58 +707,61 @@ function completeAction(S, p, a, spot) {
     case "teeth": completeTask(S, "teeth"); emit({ k: "brush", x: at.x, y: at.y }); break;
     case "flush": emit({ k: "flush", x: at.x, y: at.y }); break;
     case "peek": {
-      const night = S.stage === "night";
-      const text = S.night === 1 ? "A thin crack in the plaster. Cold air is coming through it."
-        : S.night === 2 ? (night ? "It's pitch black in there. Something shifts and goes still." : "The crack has opened into a hole. It smells like wet dirt in there.")
-        : night ? "You put your eye to the hole. Something on the other side blinks." : "The hole is as big as your fist now. It goes back much further than the wall should.";
+      const late = nightProgress(S) > 0.45;
+      const home = S.stalker.state === "away";
+      const text = home && late ? "You put your eye to the hole. Something on the other side blinks."
+        : home ? "It's pitch black in there. It smells like wet dirt. Something shifts and goes still."
+        : "The hole goes back much further than the wall should. It's empty... for now.";
       emit({ k: "msg", to: p.id, text, c: "#ce93d8" });
-      if (S.night === 3 && night) emit({ k: "stinger", to: p.id });
+      if (home && late) emit({ k: "stinger", to: p.id });
       break;
     }
-    case "bulbTake": if (S.closet.bulbs > 0) { S.closet.bulbs--; p.carry = "bulb"; emit({ k: "grab", x: at.x, y: at.y }); } break;
+    case "clipUp": if (p.carry || S.clip !== "counter") return; p.carry = "clipboard"; S.clip = p.id; emit({ k: "rustle", x: at.x, y: at.y }); break;
+    case "clipDown": if (p.carry !== "clipboard") return; p.carry = null; S.clip = "counter"; emit({ k: "rustle", x: at.x, y: at.y }); break;
+    case "battUp": {
+      const b = S.batts[a.ref];
+      if (!b || !b.here || p.carry) return;
+      b.here = false; p.carry = "batteries"; p.battFrom = a.ref;
+      emit({ k: "grab", x: at.x, y: at.y });
+      break;
+    }
+    case "bulbTake": if (S.shelf.bulbs > 0) { S.shelf.bulbs--; p.carry = "bulb"; emit({ k: "grab", x: at.x, y: at.y }); } break;
     case "bulbPut":
       if (p.carry !== "bulb") return;
       p.carry = null; S.rooms[a.ref].bulb = true; S.rooms[a.ref].on = true;
       if (a.ref === "bath") completeTask(S, "bulb");
       emit({ k: "screw", x: at.x, y: at.y });
       break;
-    case "plankTake":
-      if (S.closet.planks <= 0) return;
-      S.closet.planks--;
-      if (p.carry === "plank") p.carryN++; else { p.carry = "plank"; p.carryN = 1; }
-      emit({ k: "plank", x: at.x, y: at.y });
-      break;
-    case "batt":
-      if (S.batteries <= 0) return;
-      S.batteries--; p.bat = 100; completeTask(S, "batteries");
-      emit({ k: "grab", x: at.x, y: at.y });
-      break;
+    case "keypad": emit({ k: "keypad", to: p.id }); break;
+    case "keyUp": if (S.safe.key !== "safe" || p.carry) return; p.carry = "key"; S.safe.key = "carried"; emit({ k: "grab", x: at.x, y: at.y }); break;
+    case "keyDown": if (p.carry !== "key") return; p.carry = null; S.safe.key = "safe"; break;
     case "laundryUp": p.carry = "laundry"; S.laundry = "carried"; emit({ k: "rustle", x: at.x, y: at.y }); break;
     case "laundryPut": p.carry = null; S.laundry = "done"; completeTask(S, "laundry"); emit({ k: "creak", x: at.x, y: at.y, soft: true }); break;
-    case "hide":
-      if (tileAt(Math.floor(spot.tx), Math.floor(spot.ty)) === "b" && p.bedCD > 0) return;
-      p.hidden = true; p.act = null; p.hideT = 0;
+    case "hideCloset":
+      p.hidden = "closet"; p.act = null; p.hideT = 0;
       p.hideX = spot.tx; p.hideY = spot.ty;
-      p.seenHide = st.mode === "in" && Math.hypot(st.x - p.x, st.y - p.y) < 7 && los(S, st.x, st.y, p.x, p.y);
+      p.seenHide = monsterSees(S, p, 8);
       emit({ k: "creak", x: at.x, y: at.y, soft: true });
       break;
-    case "sleep": if (choresDone(S)) { completeTask(S, "bed"); goToSleep(S); } break;
+    case "hideBed": {
+      const bs = BED_SPOTS[a.ref];
+      if (!bs || Object.values(S.players).some((q) => q.hidden === "bed" && q.bedSpot === a.ref)) return;
+      p.seenHide = monsterSees(S, p, 8);
+      p.hidden = "bed"; p.bedSpot = a.ref; p.act = null; p.hideT = 0;
+      p.hideX = bs.x; p.hideY = bs.y;
+      emit({ k: "rustle", x: bs.x, y: bs.y });
+      break;
+    }
     case "tv": S.tv = !S.tv; emit({ k: "click", x: at.x, y: at.y }); break;
     case "phone": {
       S.phone = 0;
-      let text = S.phoneMsg;
-      if (!text && S.aggr >= 2) {
-        const i = weightedEntry(S);
-        S.nextTarget = i;
-        text = "...(breathing)... the " + ENTRIES[i].name.toLowerCase() + ". that's where i'm coming in.";
-      }
-      emit({ k: "call", to: p.id, text: text || "..." });
+      emit({ k: "call", to: p.id, text: S.phoneMsg || "...(breathing)... i can hear you doing your little chores." });
       emit({ k: "msg", text: p.name + " picked up the landline...", c: "#b0bec5" });
       S.phoneMsg = null;
       break;
     }
     case "fuse":
-      S.power = true; S.powerCD = Math.max(30, 70 - S.night * 12);
+      S.power = true; S.powerCD = rand(300, 480);
       emit({ k: "powerup" });
       emit({ k: "msg", text: p.name + " got the power back on.", c: "#ffe082" });
       break;
@@ -704,85 +773,47 @@ function completeAction(S, p, a, spot) {
       else if (r.on && !S.power) emit({ k: "msg", to: p.id, text: "Click. Nothing. The power's out.", c: "#b0bec5" });
       break;
     }
-    case "revive": {
-      const q = S.players[a.ref];
-      if (q && q.down) { q.down = false; q.snap++; emit({ k: "msg", text: p.name + " helped " + q.name + " back up!", c: "#a5d6a7" }); }
-      break;
-    }
   }
 }
 
-// ------------------------------ the story -----------------------------------
-// Beats fire once: at a time (seconds into the evening/night), after a chore
-// is done (plus a delay), or when a condition becomes true.
-const say = (text, c, big) => () => emit({ k: "msg", text, c: c || "#b0bec5", big });
-const textMsg = (text) => () => emit({ k: "text", text });
-const anyPlayer = (S, f) => Object.values(S.players).some((p) => !p.down && f(p));
-const nearWindow = (S, key, r) => { const E = ENTRIES[ENTRY_AT[key]]; return anyPlayer(S, (p) => Math.hypot(p.x - E.ix, p.y - E.iy) < r); };
-
-function ring(S, msg) { if (S.phone <= 0) { S.phone = 24; S.phoneMsg = msg; emit({ k: "msg", text: "The phone is ringing in the living room...", c: "#b0bec5" }); } }
-function knockAt(S, i, heavy) { const E = ENTRIES[i]; emit({ k: heavy ? "bang" : "knock", x: E.x + 0.5, y: E.y + 0.5 }); if (heavy) S.entries[i].hit = 1; }
-function watch(S, x, y, dur, seenMsg) {
-  const st = S.stalker;
-  Object.assign(st, { mode: "out", state: "watch", x, y, timer: dur, seenT: 0, msg: seenMsg, path: [] });
-  st.a = Math.atan2(SPOTS.center.y - y, SPOTS.center.x - x);
+// ------------------------------ texts --------------------------------------
+// He texts you. Your phone comes out by itself (and your flashlight goes away).
+const TEXTS = [
+  { text: "hey roomie :)", opts: ["who is this?", "wrong number"], ans: ["the one in the walls.", "no. it's definitely you i want."] },
+  { text: "you missed a spot", opts: ["stop watching me", "where??"], ans: ["no.", "behind you."] },
+  { text: "why'd you turn the lights on? i like the dark", opts: ["go away", "i'm not scared of you"], ans: ["i live here.", "you will be."] },
+  { text: "do your chores. or else.", opts: ["or else what?", "ok ok"], ans: ["you'll see.", "good. i'm watching."] },
+  { text: "i can hear you breathing", opts: ["leave me alone", "..."], ans: ["never.", "shhh."] },
+  { text: "check the closets", opts: ["why?", "no thanks"], ans: ["that's where i'd hide.", "smart. i'm not in there. yet."] },
+  { text: "that flashlight won't last all night", opts: ["i have batteries", "neither will you"], ans: ["not enough.", "funny."] },
+  { text: "it's almost curfew. you know the rules.", opts: ["what rules?", "bed. eyes shut."], ans: ["in bed. eyes shut. or i come get you.", "good."] },
+];
+function sendText(S, p, t) {
+  if (!active(p)) return;
+  if (t.opts) p.text = { opts: t.opts, ans: t.ans, t: 0 };
+  emit({ k: "text", to: p.id, text: t.text, opts: t.opts || null });
 }
-function goAway(S) { Object.assign(S.stalker, { mode: "out", state: "away", x: -30, y: -30, path: [], timer: 9999 }); }
 
-const STORY = {
-  "1evening": [
-    { at: 0.3, fn: () => emit({ k: "card", title: "NIGHT 1 — MONDAY", lines: ["You're apartment-sitting for your aunt May. Apartment 302, Briar Court.", "She left a list of chores. It's a quiet building.", "Mostly."], t: 7 }) },
-    { at: 10, fn: say("Your chores are listed on the left. Start with dinner: frozen meals are in the fridge.", "#ffe082") },
-    { at: 95, fn: textMsg("hey neighbor :) welcome to briar court") },
-    { after: "eat", delay: 30, fn: (S) => { if (!S.tv) { S.tv = true; emit({ k: "click", x: SPOTS.tv.x, y: SPOTS.tv.y }); } say("The TV turned itself on. Weird.")(); } },
-    { id: "yard", when: (S) => anyPlayer(S, (p) => inYard(p.x, p.y)) && !taskDone(S, "trash"), fn: (S) => watch(S, SPOTS.watchFence.x, SPOTS.watchFence.y, 12, "...was someone standing past the fence?") },
-    { id: "knock", after: "teeth", delay: 14, fn: (S) => { knockAt(S, FRONT_DOOR); say("Someone's knocking at the front door. At this hour?")(); } },
-    { after: "teeth", delay: 45, fn: textMsg("nice pajamas") },
-  ],
-  "1night": [
-    { at: 0.5, fn: (S) => { knockAt(S, FRONT_DOOR, true); emit({ k: "card", title: "2:47 AM", lines: ["Something woke you up.", "Three slow knocks on the front door."], t: 5 }); } },
-    { at: 75, fn: (S) => ring(S, "...you looked so peaceful sleeping.") },
-    { at: 140, fn: (S) => { const E = ENTRIES[ENTRY_AT["7,8"]]; emit({ k: "scratch", x: E.x + 0.5, y: E.y + 0.5 }); } },
-  ],
-  "2evening": [
-    { at: 0.3, fn: () => emit({ k: "card", title: "NIGHT 2 — TUESDAY", lines: ["Aunt May called: \"Mrs. Pell in 303 saw a man in a white mask outside our windows last night.\"", "\"Keep the chain on the door. I'll be home Thursday.\"", "The bathroom light is dead. And there's a crack in the bathroom wall you don't remember."], t: 9 }) },
-    { at: 60, fn: textMsg("you forgot to close the bedroom blinds last night") },
-    { at: 130, fn: (S) => { if (S.power) { S.flick = 2.5; emit({ k: "flicker" }); } } },
-    { id: "street", when: (S) => S.dir.t > 90 && (nearWindow(S, "7,18", 3.5) || nearWindow(S, "7,20", 3.5)), fn: (S) => watch(S, 3.5, 19.5, 14, "He was standing outside the living room window. Staring in.") },
-    { after: "laundry", delay: 12, fn: (S) => {
-      const e = S.entries[FRONT_DOOR], E = ENTRIES[FRONT_DOOR];
-      emit({ k: "rattle", x: E.x + 0.5, y: E.y + 0.5 });
-      if (!e.locked && !e.open && !e.boards) { e.open = true; emit({ k: "creak", x: E.x + 0.5, y: E.y + 0.5, heavy: true }); say("The front door just swung open by itself...", "#ff8a80")(); }
-      else say("Someone just tried the front door. The chain rattled.", "#ff8a80")();
-    } },
-    { after: "dishes", delay: 25, fn: (S) => ring(S, "...what's for dessert?") },
-    { id: "gate", when: (S) => anyPlayer(S, (p) => inYard(p.x, p.y)) && !taskDone(S, "trash"), fn: (S) => watch(S, SPOTS.watchGate.x, SPOTS.watchGate.y, 8, "Something moved by the gate.") },
-  ],
-  "2night": [
-    { at: 0.5, fn: () => { emit({ k: "card", title: "3:12 AM", lines: ["It's pitch black. The power's out.", "Someone is walking around the building."], t: 5 }); emit({ k: "powerout" }); } },
-    { at: 10, fn: say("There are planks on the shelf in the laundry room. Board up the windows.", "#ffe082") },
-  ],
-  "3evening": [
-    { at: 0.3, fn: () => emit({ k: "card", title: "NIGHT 3 — WEDNESDAY", lines: ["Aunt May gets home in the morning. One more night.", "The super left planks in the laundry room. The hole in the bathroom wall is bigger.", "He's already out there. Board up the windows. Chain the door."], t: 9 }) },
-    { at: 45, fn: textMsg("tonight.") },
-    { at: 150, fn: (S) => { if (S.power) { S.power = false; emit({ k: "powerout" }); say("The power just went out. And it's not even midnight.", "#ff5252", true)(); } } },
-    { at: 210, fn: textMsg("i'm right outside your kitchen") },
-  ],
-  "3night": [
-    { at: 0.5, fn: (S) => {
-      const open = S.entries.map((e, i) => i).filter((i) => ENTRIES[i].kind === "window" && S.entries[i].boards === 0);
-      if (open.length) { const i = pick(open); S.entries[i].broken = true; const E = ENTRIES[i]; emit({ k: "glass", x: E.x + 0.5, y: E.y + 0.5 }); S.nextTarget = i; }
-      else knockAt(S, FRONT_DOOR, true);
-      emit({ k: "stinger" });
-      emit({ k: "card", title: "1:58 AM", lines: [open.length ? "Glass breaking." : "BANG. BANG. BANG.", "He's done waiting."], t: 5 });
-    } },
-  ],
-};
+// ------------------------------ the story -----------------------------------
+const say = (text, c, big) => () => emit({ k: "msg", text, c: c || "#b0bec5", big });
+const anyPlayer = (S, f) => Object.values(S.players).some((p) => active(p) && f(p));
+function knockAt(S, i) { const E = ENTRIES[i]; emit({ k: "knock", x: E.x + 0.5, y: E.y + 0.5 }); }
+function ring(S, msg) { if (S.phone <= 0) { S.phone = 24; S.phoneMsg = msg; emit({ k: "msg", text: "The landline is ringing in the living room...", c: "#b0bec5" }); } }
+
+const STORY = [
+  { at: 0.3, fn: (S) => emit({ k: "card", title: S.resets ? "9:00 PM. AGAIN." : "CURFEW CONTROL", lines: S.resets
+    ? ["You wake up in bed. The clock says 9:00 PM.", "Your chores are undone. He's faster now.", "Get out before 6:00 AM."]
+    : ["9:00 PM. Apartment 302.", "Your chores are on the clipboard by the kitchen sink. Finish them and you'll find the code to the safe.", "The front door key is in the safe. Get out before 6:00 AM.", "And at curfew: be in bed, eyes shut."], t: 10 }) },
+  { at: 11, fn: say("Find the clipboard on the counter next to the kitchen sink. Look right at things and press E.", "#ffe082") },
+  { at: 40, fn: (S) => { for (const p of Object.values(S.players)) sendText(S, p, TEXTS[0]); } },
+  { at: 80, fn: (S) => { knockAt(S, FRONT_DOOR); say("Someone's knocking on the front door. At this hour?")(); } },
+  { at: 105, fn: (S) => { if (!S.tv && S.power) { S.tv = true; emit({ k: "click", x: SPOTS.tv.x, y: SPOTS.tv.y }); } say("The TV turned itself on.")(); } },
+  { id: "yard", when: (S) => S.stalker.state === "away" && anyPlayer(S, (p) => inBackyard(p.x, p.y)), fn: (S) => watchFrom(S, SPOTS.watchYard.x, SPOTS.watchYard.y, 10, "...was someone standing past the fence?") },
+  { after: "laundry", delay: 15, fn: (S) => ring(S, "...(breathing)... you folded them wrong.") },
+];
 
 function runDirector(S) {
-  const beats = STORY[S.night + S.stage];
-  if (!beats) return;
-  beats.forEach((b, i) => {
+  STORY.forEach((b, i) => {
     const id = b.id || "b" + i;
     if (S.dir.fired[id]) return;
     let go = false;
@@ -795,13 +826,85 @@ function runDirector(S) {
   });
 }
 
-// ----------------------------- the stalker ----------------------------------
-const passOut = (tx, ty) => { const c = tileAt(tx, ty); return c === "," || c === "y" || c === "G"; };
-const passIn = (allowEntry) => (tx, ty) => { const c = tileAt(tx, ty); return c === "." || c === "a" || c === "d" || (allowEntry != null && ENTRY_AT[tx + "," + ty] === allowEntry); };
+// --------------------------------- curfew -----------------------------------
+// At curfew every light goes out. You have 20 seconds to get in bed and shut
+// your eyes (look up). Then he comes to check. Flashlight on = he finds you.
+function updateCurfew(S, dt) {
+  const c = S.curfew;
+  if (c.state === "none") {
+    if (c.i < CURFEWS.length && S.mins >= CURFEWS[c.i] && !S.cut) {
+      c.state = "warn"; c.t = 20;
+      for (const id in S.rooms) S.rooms[id].on = false;
+      S.tv = false;
+      emit({ k: "curfew" });
+      emit({ k: "msg", text: "CURFEW. Get in bed and close your eyes (look up at the ceiling). 20 seconds.", c: "#ff5252", big: true });
+      for (const p of Object.values(S.players)) sendText(S, p, { text: "curfew. lights out. in bed. eyes shut." });
+    }
+    return;
+  }
+  c.t -= dt;
+  if (c.state === "warn" && c.t <= 0) {
+    c.state = "check"; c.t = 30;
+    startCheck(S);
+  } else if (c.state === "check" && c.t <= 0) {
+    c.state = "none"; c.i++;
+    if (S.stalker.state === "check") goReturn(S);
+    emit({ k: "msg", text: "It's quiet again. You can get up.", c: "#a5d6a7" });
+  }
+}
+
+function startCheck(S) {
+  const st = S.stalker;
+  if (st.state === "chase" || st.state === "rageOut" || st.state === "rageAway" || S.cut) return;
+  // anyone out of bed with a flashlight on: he shows up at the window next to them
+  const lit = Object.values(S.players).filter((p) => active(p) && !p.hidden && flashOn(p) && inHouse(p.x, p.y));
+  if (lit.length) {
+    const p = pick(lit);
+    let best = -1, bd = 1e9;
+    ENTRIES.forEach((E, i) => {
+      if (E.kind !== "window" || S.entries[i].broken) return;
+      const d = Math.hypot(E.ix - p.x, E.iy - p.y);
+      if (d < bd) { bd = d; best = i; }
+    });
+    if (best >= 0) {
+      const E = ENTRIES[best];
+      Object.assign(st, { mode: "out", state: "window", x: E.ox, y: E.oy, timer: 3.5, target: p.id, win: best, path: [], spd: 0 });
+      st.a = Math.atan2(E.iy - E.oy, E.ix - E.ox);
+      S.entries[best].hit = 1;
+      emit({ k: "bang", x: E.x + 0.5, y: E.y + 0.5 });
+      emit({ k: "stinger" });
+      emit({ k: "msg", to: p.id, text: "Your flashlight was on. He's at the " + E.name.toLowerCase() + "!", c: "#ff1744", big: true });
+      return;
+    }
+  }
+  // otherwise he walks the apartment, checking the beds first
+  if (st.mode !== "in") emerge(S);
+  st.state = "check"; st.path = []; st.wait = st.wait || 0;
+  st.wps = [[11.5, 9.6], [11.6, 19.4], [15.5, 12.5], [10.5, 14.5], [19.5, 13.5], [18.5, 19.5]].map(([x, y]) => ({ x, y }));
+}
+
+// ------------------------------ the monster ---------------------------------
+const passIn = (tx, ty) => { const c = tileAt(tx, ty); return c === "." || c === "a" || c === "d"; };
 const stalkerSolidFn = (S) => (tx, ty) => { const c = tileAt(tx, ty); return !(c === "." || c === "a" || (c === "d" && S.idoors[IDOOR_AT[tx + "," + ty]].open)); };
+const passOut = (tx, ty) => { const c = tileAt(tx, ty); return c === "," || c === "y" || c === "G"; };
+
+// tables you can run circles around
+const LOOP_CENTERS = (() => {
+  const out = [], seen = new Set();
+  for (let y = 0; y < MAP_H; y++) for (let x = 0; x < MAP_W; x++) {
+    const c = MAP[y][x];
+    if ("Tc".indexOf(c) < 0 || seen.has(x + "," + y)) continue;
+    let x1 = x, y1 = y;
+    while (MAP[y][x1 + 1] === c) x1++;
+    while (MAP[y1 + 1] && MAP[y1 + 1][x] === c) y1++;
+    for (let yy = y; yy <= y1; yy++) for (let xx = x; xx <= x1; xx++) seen.add(xx + "," + yy);
+    out.push({ x: (x + x1 + 1) / 2, y: (y + y1 + 1) / 2 });
+  }
+  return out;
+})();
 
 function goTo(st, gx, gy, pass) {
-  const p = bfs(Math.floor(st.x), Math.floor(st.y), Math.floor(gx), Math.floor(gy), pass);
+  const p = bfs(Math.floor(st.x), Math.floor(st.y), Math.floor(gx), Math.floor(gy), pass || passIn);
   if (p === null) { st.path = []; return false; }
   if (p.length) p[p.length - 1] = { x: gx, y: gy }; else p.push({ x: gx, y: gy });
   st.path = p;
@@ -818,12 +921,13 @@ function followPath(S, st, spd, dt) {
       if (!dr.open && Math.hypot(n0.x - st.x, n0.y - st.y) < 1.2) {
         dr.open = true;
         emit({ k: "creak", x: n0.x, y: n0.y, slow: true });
-        st.pause = 0.8;
+        st.pause = st.state === "chase" ? 0.35 : 0.8;
       }
     }
   }
-  if (st.pause > 0) { st.pause -= dt; return false; }
+  if (st.pause > 0) { st.pause -= dt; st.spd = 0; return false; }
   let move = spd * dt;
+  st.spd = spd;
   while (move > 0 && st.path.length) {
     const n = st.path[0];
     const dx = n.x - st.x, dy = n.y - st.y, d = Math.hypot(dx, dy);
@@ -831,313 +935,418 @@ function followPath(S, st, spd, dt) {
     if (d <= move) { st.x = n.x; st.y = n.y; st.path.shift(); move -= d; }
     else { st.x += dx / d * move; st.y += dy / d * move; move = 0; }
   }
+  if (!st.path.length) st.spd = 0;
   return st.path.length === 0;
 }
 
-function litByAny(S, x, y) {
-  for (const p of Object.values(S.players)) if (flashHits(S, p, x, y)) return true;
-  return false;
-}
-
-function weightedEntry(S) {
+// how fast he runs at you: just under your sprint, scaled to your injuries
+function chaseSpeed(S, p) {
   const st = S.stalker;
-  const w = S.entries.map((e, i) => {
-    let v = e.broken || e.open ? 4 : 1 / (1 + e.boards * 1.6);
-    if (ENTRIES[i].kind === "door" && !e.locked && !e.boards) v *= 2.5;
-    if (i === st.last) v *= 0.3;
-    return v;
-  });
-  let sum = w.reduce((a, b) => a + b, 0), r = Math.random() * sum;
-  for (let i = 0; i < w.length; i++) { r -= w[i]; if (r <= 0) return i; }
-  return 0;
+  const ratio = S.resets > 0 ? RESET_RATIO : st.rage ? RAGE_RATIO : CHASE_RATIO;
+  return SPRINT * (p ? p.spd : 1) * ratio;
 }
+function walkSpeed(S) { return 1.45 + nightProgress(S) * 0.45 + (S.resets ? 0.4 : 0); }
 
-function nightProgress(S) {
-  if (S.stage !== "night") return 0;
-  const cfg = NIGHTS[S.night];
-  return clamp((S.mins - cfg.wake) / (NIGHT_END - cfg.wake), 0, 1);
-}
-
-function wanderDelay(S) {
-  const base = [20, 16, 11, 7][S.aggr] || 7;
-  return Math.max(3, base - nightProgress(S) * 3 - (S.n - 1) * 0.6) + rand(0, 5);
-}
-
-function wanderOutside(S) {
+// can he see this player right now?
+function monsterSees(S, p, maxD) {
   const st = S.stalker;
-  for (let tries = 0; tries < 30; tries++) {
-    const tx = Math.floor(rand(0, MAP_W)), ty = Math.floor(rand(0, MAP_H));
-    if (tileAt(tx, ty) === "," && Math.hypot(tx - st.x, ty - st.y) < 14) { goTo(st, tx + 0.5, ty + 0.5, passOut); return; }
-  }
+  if (st.mode !== "in" || !active(p)) return false;
+  const d = Math.hypot(p.x - st.x, p.y - st.y);
+  if (maxD && d > maxD) return false;
+  if (d < 1.3) return true;
+  if (!los(S, st.x, st.y, p.x, p.y)) return false;
+  if (flashHits(S, p, st.x, st.y)) return true;
+  const range = roomLit(S, p.x, p.y) || flashOn(p) ? 11 : 4.5;
+  if (d > range) return false;
+  return Math.abs(angDiff(Math.atan2(p.y - st.y, p.x - st.x), st.a)) < 1.25;
 }
-
-function stalkerDecide(S) {
-  const st = S.stalker, r = Math.random(), A = S.aggr;
-  if (A <= 0) { goAway(S); return; }
-  const windows = ENTRIES.map((E, i) => i).filter((i) => ENTRIES[i].kind === "window" && !S.entries[i].broken);
-  if (A >= 2 && S.power && S.powerCD <= 0 && r < 0.2) {
-    st.next = "cut";
-    goTo(st, BREAKER.x - 0.5, BREAKER.y + 0.5, passOut);
-  } else if (S.nextTarget < 0 && windows.length && r < [0, 0.5, 0.3, 0.15][A]) {
-    st.target = pick(windows); st.next = "peek";
-    goTo(st, ENTRIES[st.target].ox, ENTRIES[st.target].oy, passOut);
-  } else if (A === 1) {
-    st.target = pick([FRONT_DOOR, FRONT_DOOR, pick(windows.length ? windows : [FRONT_DOOR])]);
-    st.next = "knock";
-    goTo(st, ENTRIES[st.target].ox, ENTRIES[st.target].oy, passOut);
-  } else {
-    let i = S.nextTarget; S.nextTarget = -1;
-    if (i < 0) i = weightedEntry(S);
-    st.target = i; st.next = "attack";
-    goTo(st, ENTRIES[i].ox, ENTRIES[i].oy, passOut);
-  }
-  st.state = "goto";
-}
-
-function doBang(S, i) {
-  const st = S.stalker, E = ENTRIES[i], e = S.entries[i];
-  if (e.broken || e.open) { enterInside(S, i); return; }
-  // an unlocked door: he just opens it
-  if (E.kind === "door" && !e.locked && !e.boards) {
-    e.open = true;
-    emit({ k: "creak", x: E.x + 0.5, y: E.y + 0.5, heavy: true, slow: true });
-    emit({ k: "msg", text: "The " + E.name.toLowerCase() + " wasn't locked. He's coming in!", c: "#ff1744", big: true });
-    emit({ k: "stinger" });
-    enterInside(S, i);
-    return;
-  }
-  const factor = S.aggr >= 3 ? 1 : 0.55;
-  const dmg = (11 + nightProgress(S) * 8) * factor * (S.power ? 1 : 1.3) * (0.75 + 0.12 * S.n) * rand(0.8, 1.2);
-  e.hit = 1;
-  emit({ k: "bang", x: E.x + 0.5, y: E.y + 0.5 });
-  if (e.boards > 0) {
-    e.bhp -= dmg;
-    if (e.bhp <= 0) {
-      e.boards--; e.bhp = 100;
-      emit({ k: "wood", x: E.x + 0.5, y: E.y + 0.5 });
-      emit({ k: "msg", text: "A board on the " + E.name.toLowerCase() + " just snapped!", c: "#ffab40" });
-    }
-  } else {
-    e.lock -= dmg;
-    if (e.lock <= 0) {
-      e.broken = true; e.lock = 0;
-      emit({ k: E.kind === "window" ? "glass" : "doorbreak", x: E.x + 0.5, y: E.y + 0.5 });
-      emit({ k: "msg", text: "HE BROKE IN THROUGH THE " + E.name.toUpperCase() + "! RUN AND HIDE!", c: "#ff1744", big: true });
-      emit({ k: "stinger" });
-      enterInside(S, i);
-    }
-  }
-  st.a = Math.atan2(E.y + 0.5 - st.y, E.x + 0.5 - st.x);
-}
-
-function enterInside(S, i) {
-  const st = S.stalker, E = ENTRIES[i];
-  if (S.aggr < 2) return; // night 1: he never comes in
-  st.mode = "in"; st.state = "hunt"; st.timer = (S.n === 1 ? 13 : 17) + S.night * 3;
-  st.x = E.ix; st.y = E.iy; st.path = []; st.lastSeen = null; st.repath = 0; st.pause = 0;
-}
-
-function startLeave(S) {
+// players he notices: seen, or heard sprinting nearby
+function spotPlayer(S) {
   const st = S.stalker;
-  let best = 0, bs = 1e9;
-  ENTRIES.forEach((E, i) => {
-    const e = S.entries[i];
-    const s = Math.hypot(E.x + 0.5 - st.x, E.y + 0.5 - st.y) + (e.broken || e.open ? 0 : 6);
-    if (s < bs) { bs = s; best = i; }
-  });
-  st.state = "leave"; st.target = best;
-  if (!goTo(st, ENTRIES[best].x + 0.5, ENTRIES[best].y + 0.5, passIn(best))) exitHouse(S);
-}
-
-function exitHouse(S) {
-  const st = S.stalker, i = st.target, E = ENTRIES[i], e = S.entries[i];
-  if (!e.broken && !e.open) {
-    if (E.kind === "door" && !e.boards) { e.open = true; e.locked = false; emit({ k: "creak", x: E.x + 0.5, y: E.y + 0.5, heavy: true }); }
-    else { e.broken = true; e.boards = 0; e.lock = 0; emit({ k: E.kind === "window" ? "glass" : "doorbreak", x: E.x + 0.5, y: E.y + 0.5 }); }
+  let best = null, bd = 1e9;
+  for (const p of Object.values(S.players)) {
+    if (!active(p) || p.hidden) continue;
+    const d = Math.hypot(p.x - st.x, p.y - st.y);
+    if (monsterSees(S, p) && d < bd) { bd = d; best = p; }
   }
-  st.mode = "out"; st.state = "wander"; st.timer = wanderDelay(S) + 5;
-  st.x = E.x + E.dx + 0.5; st.y = E.y + E.dy + 0.5; st.path = []; st.last = i;
-  emit({ k: "msg", text: "He went back outside through the " + E.name.toLowerCase() + "... close it up!", c: "#ffab40" });
-  wanderOutside(S);
+  return best;
+}
+function heardPlayer(S) {
+  const st = S.stalker;
+  for (const p of Object.values(S.players)) {
+    if (active(p) && !p.hidden && p.sp && inHouse(p.x, p.y) && Math.hypot(p.x - st.x, p.y - st.y) < 7) return p;
+  }
+  return null;
 }
 
-function catchPlayer(S, p) {
-  p.down = true; p.hidden = false; p.act = null; p.snap++;
-  if (p.carry) dropItem(S, p);
-  emit({ k: "caught", id: p.id, name: p.name, x: p.x, y: p.y });
-  if (S.stalker.mode === "in" && Object.values(S.players).some((q) => !q.down)) startLeave(S);
+function emerge(S) {
+  const st = S.stalker;
+  Object.assign(st, { mode: "in", x: SPOTS.holeIn.x, y: SPOTS.holeIn.y, a: 0, path: [], pause: 0, wait: 2.2, lastSeen: null, target: null, lostT: 0 });
+  emit({ k: "scratch", x: SPOTS.hole.x, y: SPOTS.hole.y });
+  emit({ k: "creak", x: SPOTS.hole.x, y: SPOTS.hole.y, heavy: true });
+}
+function startPatrol(S) {
+  const st = S.stalker;
+  st.state = "patrol"; st.target = null;
+  st.timer = 45 + nightProgress(S) * 45 + rand(0, 15);
+  st.path = [];
+}
+function goReturn(S) {
+  const st = S.stalker;
+  st.state = "return"; st.target = null; st.rage = false;
+  if (!goTo(st, SPOTS.holeIn.x, SPOTS.holeIn.y)) vanish(S, 30);
+}
+function vanish(S, away) {
+  const st = S.stalker;
+  Object.assign(st, { mode: "away", state: "away", x: -30, y: -30, path: [], target: null, rage: false, timer: away, spd: 0 });
+}
+function investigate(S, x, y) {
+  const st = S.stalker;
+  if (S.cut || st.state === "chase" || curfewOn(S)) return;
+  if (st.state === "away") { st.timer = Math.min(st.timer, 4); return; }
+  if (st.mode !== "in") return;
+  st.state = "search"; st.lastSeen = { x, y }; st.look = 0; st.checked = false;
+  goTo(st, x, y);
+}
+function startChase(S, p) {
+  const st = S.stalker;
+  if (st.state !== "chase") { emit({ k: "stinger" }); emit({ k: "msg", to: p.id, text: "HE SEES YOU. RUN!", c: "#ff1744", big: true }); }
+  st.state = "chase"; st.target = p.id; st.lostT = 0; st.repath = 0; st.wait = 0;
+  st.lastSeen = { x: p.x, y: p.y };
+  if (!st.loop || st.loop.id !== p.id) st.loop = { id: p.id, c: -1, last: 0, acc: 0, away: 0 };
+}
+function startSearch(S, x, y) {
+  const st = S.stalker;
+  st.state = "search"; st.look = 0; st.checked = false; st.target = null;
+  if (x != null) goTo(st, x, y); else st.path = [];
+}
+
+function watchFrom(S, x, y, dur, seenMsg) {
+  const st = S.stalker;
+  Object.assign(st, { mode: "out", state: "watch", x, y, timer: dur, seenT: 0, msg: seenMsg, path: [], spd: 0 });
+  st.a = Math.atan2(SPOTS.center.y - y, SPOTS.center.x - x);
 }
 
 function updateStalker(S, dt) {
   const st = S.stalker;
-  st.stun = st.state !== "away" && litByAny(S, st.x, st.y);
-  if (st.mode === "out") {
-    const spd = 2.2 + S.aggr * 0.2 + nightProgress(S) * 0.4;
-    // anyone out in the yard at night is fair game
-    if (S.aggr >= 1 && st.state !== "away" && st.state !== "watch") {
-      for (const p of Object.values(S.players)) {
-        if (!p.down && inYard(p.x, p.y) && Math.hypot(p.x - st.x, p.y - st.y) < 0.75) { catchPlayer(S, p); break; }
+  switch (st.state) {
+    case "away":
+      st.timer -= dt;
+      if (st.timer <= 0) {
+        emerge(S); startPatrol(S);
+        if (!S.dir.fired.firstOut) { S.dir.fired.firstOut = true; emit({ k: "msg", text: "Something is scraping inside the bathroom wall...", c: "#ff8a80", big: true }); }
       }
+      return;
+    case "watch": {
+      st.timer -= dt;
+      const seen = anyPlayer(S, (p) => !p.hidden && Math.hypot(p.x - st.x, p.y - st.y) < 24 &&
+        Math.abs(angDiff(Math.atan2(st.y - p.y, st.x - p.x), p.a)) < 0.45 && los(S, p.x, p.y, st.x, st.y));
+      if (seen) st.seenT += dt;
+      if (st.seenT > 0.9 || st.timer <= 0) {
+        if (st.seenT > 0.9) { emit({ k: "stinger", soft: true }); emit({ k: "msg", text: st.msg, c: "#ff8a80" }); }
+        vanish(S, Math.max(st.timer, 0) + 20);
+      }
+      return;
     }
-    switch (st.state) {
-      case "away": break;
-      case "watch": {
-        st.timer -= dt;
-        const seen = anyPlayer(S, (p) => !p.hidden && Math.hypot(p.x - st.x, p.y - st.y) < 24 &&
-          Math.abs(angDiff(Math.atan2(st.y - p.y, st.x - p.x), p.a)) < 0.45 && los(S, p.x, p.y, st.x, st.y));
-        if (seen) st.seenT += dt;
-        if (st.seenT > 0.9) { emit({ k: "stinger", soft: true }); if (st.msg) emit({ k: "msg", text: st.msg, c: "#ff8a80" }); goAway(S); }
-        else if (st.timer <= 0) goAway(S);
-        if (st.state === "away" && S.aggr > 0) { st.state = "wander"; st.x = 1.5; st.y = 30.5; st.timer = 10; }
-        break;
+    case "window": {
+      // a face at the glass, then he smashes through
+      st.timer -= dt;
+      const E = ENTRIES[st.win];
+      st.a = Math.atan2(E.iy - E.oy, E.ix - E.ox);
+      if (st.timer <= 0) {
+        S.entries[st.win].broken = true;
+        emit({ k: "glass", x: E.x + 0.5, y: E.y + 0.5 });
+        Object.assign(st, { mode: "in", x: E.ix, y: E.iy, path: [], pause: 0.5 });
+        const p = S.players[st.target];
+        if (p && active(p) && !p.hidden) startChase(S, p); else startPatrol(S);
       }
-      case "wander":
-        st.timer -= dt;
-        followPath(S, st, spd * 0.6, dt);
-        if (st.timer <= 0) stalkerDecide(S);
-        break;
-      case "goto":
-        if (followPath(S, st, spd, dt)) {
-          st.state = st.next; st.expose = 0;
-          const E = ENTRIES[st.target];
-          if (st.state === "attack") {
-            st.timer = 6 + S.aggr * 1.5 + nightProgress(S) * 4 + rand(0, 3); st.bangT = 0.6;
-            emit({ k: "msg", text: "Something is pounding on the " + E.name.toLowerCase() + "!", c: "#ffab40" });
-          } else if (st.state === "peek") {
-            st.timer = rand(3, 6);
-            emit({ k: Math.random() < 0.5 ? "tap" : "scratch", x: E.x + 0.5, y: E.y + 0.5 });
-          } else if (st.state === "knock") {
-            st.timer = 3.5;
-            const e = S.entries[st.target];
-            if (E.kind === "door") {
-              emit({ k: "knock", x: E.x + 0.5, y: E.y + 0.5 });
-              emit({ k: "rattle", x: E.x + 0.5, y: E.y + 0.5 });
-              if (!e.locked && !e.open && !e.boards) {
-                e.open = true;
-                emit({ k: "creak", x: E.x + 0.5, y: E.y + 0.5, heavy: true, slow: true });
-                emit({ k: "msg", text: "The " + E.name.toLowerCase() + " just creaked open...", c: "#ff8a80" });
-              }
-            } else emit({ k: "tap", x: E.x + 0.5, y: E.y + 0.5 });
-          } else st.timer = 2;
-        }
-        break;
-      case "attack":
-      case "peek":
-      case "knock": {
-        const E = ENTRIES[st.target];
-        st.a = Math.atan2(E.y + 0.5 - st.y, E.x + 0.5 - st.x);
-        // a flashlight in his face through a window scares him off
-        if (st.stun) {
-          st.expose += dt;
-          if (st.expose > 0.9) {
-            emit({ k: "hiss", x: st.x, y: st.y });
-            emit({ k: "msg", text: "He flinched away from the light!", c: "#80deea" });
-            st.state = "wander"; st.timer = wanderDelay(S) + 3; st.last = st.target;
-            wanderOutside(S);
-            break;
-          }
-        } else st.expose = Math.max(0, st.expose - dt * 0.5);
-        if (st.state === "attack") {
-          st.bangT -= dt;
-          if (st.bangT <= 0) {
-            st.bangT = Math.max(0.75, 1.35 - nightProgress(S) * 0.4) * rand(0.8, 1.2);
-            doBang(S, st.target);
-            if (st.mode === "in") break;
-          }
-        }
-        st.timer -= dt;
-        if (st.timer <= 0) { st.last = st.target; st.state = "wander"; st.timer = wanderDelay(S); wanderOutside(S); }
-        break;
-      }
-      case "cut":
-        st.a = Math.PI;
-        st.timer -= dt;
-        if (st.timer <= 0) {
-          if (S.power) {
-            S.power = false;
-            emit({ k: "powerout" });
-            emit({ k: "msg", text: "THE POWER WENT OUT. Fix the fuse box in the laundry room!", c: "#ff5252", big: true });
-          }
-          st.state = "wander"; st.timer = wanderDelay(S); wanderOutside(S);
-        }
-        break;
+      return;
     }
-    return;
+    case "rageAway":
+      st.timer -= dt;
+      if (st.timer <= 0) {
+        const E = ENTRIES[FRONT_DOOR];
+        Object.assign(st, { mode: "in", x: E.ix, y: E.iy, path: [], pause: 0.3, rage: true });
+        emit({ k: "creak", x: E.x + 0.5, y: E.y + 0.5, heavy: true });
+        emit({ k: "msg", text: "He's back. And he's FAST.", c: "#ff1744", big: true });
+        const p = S.players[st.target];
+        if (p && active(p) && !p.hidden) startChase(S, p); else startSearch(S, p ? p.x : null, p ? p.y : null);
+      }
+      return;
+    case "rageOut": {
+      const E = ENTRIES[FRONT_DOOR];
+      if (followPath(S, st, SPRINT * 1.3, dt)) {
+        emit({ k: "creak", x: E.x + 0.5, y: E.y + 0.5, heavy: true });
+        Object.assign(st, { mode: "out", state: "rageAway", x: SPOTS.frontOut.x, y: SPOTS.frontOut.y, timer: 3.5, path: [], spd: 0 });
+      }
+      return;
+    }
+  }
+  if (st.mode !== "in") return;
+
+  // bed rule: eyes open in a bed he's standing next to = he sees you
+  for (const p of Object.values(S.players)) {
+    if (!active(p) || p.hidden !== "bed" || eyesShut(p)) continue;
+    const d = Math.hypot(p.hideX - st.x, p.hideY - st.y);
+    if (d < 2.8 && los(S, st.x, st.y, p.hideX, p.hideY)) { st.a = Math.atan2(p.hideY - st.y, p.hideX - st.x); strike(S, p, "bed"); return; }
   }
 
-  // ---- inside the house ----
-  const spd = (st.stun ? 0.4 : 1) * (2.7 + S.night * 0.15);
-  if (st.state === "leave") {
-    if (followPath(S, st, spd, dt)) exitHouse(S);
-    return;
+  switch (st.state) {
+    case "patrol": {
+      st.timer -= dt;
+      const p = spotPlayer(S);
+      if (p) { startChase(S, p); break; }
+      const h = heardPlayer(S);
+      if (h) { investigate(S, h.x, h.y); break; }
+      if (st.path.length) { followPath(S, st, walkSpeed(S), dt); break; }
+      if (st.wait > 0) { st.wait -= dt; st.spd = 0; st.a += dt * 0.6 * Math.sin(S.dir.t * 0.7); break; }
+      if (st.timer <= 0) { goReturn(S); break; }
+      const r = pick(ROOMS);
+      const f = pick(FLOORS.filter((t) => t.x >= r.x0 && t.x <= r.x1 && t.y >= r.y0 && t.y <= r.y1)) || pick(FLOORS);
+      goTo(st, f.x + 0.5, f.y + 0.5);
+      st.wait = rand(1.5, 3.5);
+      break;
+    }
+    case "search": {
+      const p = spotPlayer(S);
+      if (p) { startChase(S, p); break; }
+      if (st.path.length) { followPath(S, st, walkSpeed(S) * 1.3, dt); break; }
+      st.look += dt; st.spd = 0;
+      st.a += dt * 1.6 * Math.sin(st.look * 1.3);
+      if (st.look > 1.5 && !st.checked) { st.checked = true; checkClosets(S); if (st.state !== "search") break; }
+      if (st.look > 4) startPatrol(S);
+      break;
+    }
+    case "check": {
+      const p = spotPlayer(S);
+      if (p) { startChase(S, p); break; }
+      if (st.path.length) { followPath(S, st, walkSpeed(S), dt); break; }
+      if (st.wait > 0) { st.wait -= dt; st.a += dt * 0.8; st.spd = 0; break; }
+      const w = st.wps.shift();
+      if (w) { goTo(st, w.x, w.y); st.wait = 2.5; checkClosets(S, 0.25); }
+      else st.wps = [[11.5, 9.6], [11.6, 19.4]].map(([x, y]) => ({ x, y }));
+      break;
+    }
+    case "chase": {
+      const p = S.players[st.target];
+      if (!p || !active(p)) { startSearch(S); break; }
+      if (p.hidden) {
+        // you hid. If he saw you do it, he knows where you are.
+        if (p.hidden === "closet" && p.seenHide) {
+          if (Math.hypot(p.hideX - st.x, p.hideY - st.y) < 1.25) { strike(S, p, "closet"); break; }
+          st.repath -= dt;
+          if (st.repath <= 0 || !st.path.length) { st.repath = 0.5; const o = standNear(S, p.hideX, p.hideY); goTo(st, o.x, o.y); }
+          followPath(S, st, chaseSpeed(S, p), dt);
+          break;
+        }
+        if (p.hidden === "bed" && p.seenHide) {
+          // he stands over the bed, waiting for you to open your eyes
+          const o = standNear(S, p.hideX, p.hideY);
+          if (Math.hypot(o.x - st.x, o.y - st.y) > 0.5) {
+            st.repath -= dt;
+            if (st.repath <= 0 || !st.path.length) { st.repath = 0.5; goTo(st, o.x, o.y); }
+            followPath(S, st, chaseSpeed(S, p), dt);
+          } else {
+            st.spd = 0; st.a = Math.atan2(p.hideY - st.y, p.hideX - st.x);
+            st.lostT += dt;
+            if (st.lostT > 9) { p.seenHide = false; startSearch(S); }
+          }
+          break;
+        }
+        startSearch(S, st.lastSeen.x, st.lastSeen.y);
+        break;
+      }
+      const d = Math.hypot(p.x - st.x, p.y - st.y);
+      if (d < 0.75) { strike(S, p, "caught"); break; }
+      const sees = monsterSees(S, p) || d < 2;
+      if (sees) { st.lastSeen = { x: p.x, y: p.y }; st.lostT = 0; }
+      else st.lostT += dt;
+      if (st.lostT > 3.5) { startSearch(S, st.lastSeen.x, st.lastSeen.y); break; }
+      if (!st.rage && S.resets === 0 && trackLoop(S, p, dt)) { startRage(S, p); break; }
+      const spd = chaseSpeed(S, p);
+      if (sees && d < 2.2 && los(S, st.x, st.y, p.x, p.y)) {
+        const dx = p.x - st.x, dy = p.y - st.y;
+        st.a = Math.atan2(dy, dx); st.spd = spd;
+        moveCircle(st, dx / d * spd * dt, dy / d * spd * dt, 0.3, stalkerSolidFn(S));
+        st.path = [];
+      } else {
+        st.repath -= dt;
+        const goal = sees ? p : st.lastSeen;
+        if (st.repath <= 0 || !st.path.length) { st.repath = 0.3; goTo(st, goal.x, goal.y); }
+        followPath(S, st, spd, dt);
+      }
+      break;
+    }
+    case "return":
+    case "retreat":
+      if (followPath(S, st, walkSpeed(S) * (st.state === "retreat" ? 1.5 : 1), dt)) {
+        emit({ k: "scratch", x: SPOTS.hole.x, y: SPOTS.hole.y });
+        vanish(S, st.state === "retreat" ? 25 : Math.max(18, 55 - nightProgress(S) * 30 + rand(0, 20)));
+      } else if (st.state === "return") {
+        const p = spotPlayer(S);
+        if (p) startChase(S, p);
+      }
+      break;
   }
-  st.timer -= dt;
-  let tgt = null, bd = 1e9, seeDirect = false;
+}
+
+// circling a table: add up how far round it you've gone
+function trackLoop(S, p, dt) {
+  const st = S.stalker, L = st.loop;
+  if (!L) return false;
+  let ci = -1, cd = 1e9;
+  LOOP_CENTERS.forEach((c, i) => { const d = Math.hypot(p.x - c.x, p.y - c.y); if (d < cd) { cd = d; ci = i; } });
+  const C = LOOP_CENTERS[ci];
+  if (!C || cd > 2.8 || Math.hypot(st.x - C.x, st.y - C.y) > 3.6) {
+    L.away += dt;
+    if (L.away > 2) { L.acc = 0; L.c = -1; }
+    return false;
+  }
+  L.away = 0;
+  const ang = Math.atan2(p.y - C.y, p.x - C.x);
+  if (L.c !== ci) { L.c = ci; L.last = ang; L.acc = 0; return false; }
+  L.acc += angDiff(ang, L.last);
+  L.last = ang;
+  return Math.abs(L.acc) > Math.PI * 2.5;
+}
+
+function startRage(S, p) {
+  const st = S.stalker;
+  st.loop = null; st.target = p.id;
+  emit({ k: "scream", x: st.x, y: st.y, rage: true });
+  emit({ k: "msg", text: "He screams and bolts out the front door...", c: "#ff1744", big: true });
+  const E = ENTRIES[FRONT_DOOR];
+  st.state = "rageOut";
+  if (!goTo(st, E.ix, E.iy)) Object.assign(st, { mode: "out", state: "rageAway", x: SPOTS.frontOut.x, y: SPOTS.frontOut.y, timer: 3.5, path: [] });
+}
+
+// he opens closets near where he's looking for you
+function checkClosets(S, chance) {
+  const st = S.stalker;
   for (const p of Object.values(S.players)) {
-    if (p.down) continue;
-    let px = p.x, py = p.y;
-    if (p.hidden) { if (!p.seenHide) continue; px = p.hideX; py = p.hideY; }
-    const d = Math.hypot(px - st.x, py - st.y);
-    const range = roomLit(S, px, py) || flashOn(p) ? 12 : 5;
-    const vis = !p.hidden && (d < 1.6 || (d < range && los(S, st.x, st.y, px, py)));
-    if ((p.hidden || vis) && d < bd) { bd = d; tgt = { p, px, py }; seeDirect = vis; }
-  }
-  if (tgt) {
-    st.lastSeen = { x: tgt.px, y: tgt.py };
-    st.timer = Math.max(st.timer, 3);
-    if (bd < (tgt.p.hidden ? 1.15 : 0.65)) { catchPlayer(S, tgt.p); return; }
-    if (seeDirect && bd < 2.2) {
-      const dx = tgt.px - st.x, dy = tgt.py - st.y;
-      st.a = Math.atan2(dy, dx);
-      moveCircle(st, dx / bd * spd * dt, dy / bd * spd * dt, 0.3, stalkerSolidFn(S));
-      st.path = [];
-    } else {
-      st.repath -= dt;
-      if (st.repath <= 0 || !st.path.length) { st.repath = 0.4; goTo(st, tgt.px, tgt.py, passIn(null)); }
-      followPath(S, st, spd, dt);
+    if (!active(p) || p.hidden !== "closet") continue;
+    if (Math.hypot(p.hideX - st.x, p.hideY - st.y) > 2.2) continue;
+    if (p.seenHide || Math.random() < (chance == null ? 0.35 : chance)) {
+      emit({ k: "creak", x: p.hideX, y: p.hideY, heavy: true });
+      strike(S, p, "closet");
+      return;
     }
-  } else {
-    if (!st.path.length) {
-      if (st.lastSeen) { goTo(st, st.lastSeen.x, st.lastSeen.y, passIn(null)); st.lastSeen = null; }
-      else { const f = pick(FLOORS); goTo(st, f.x + 0.5, f.y + 0.5, passIn(null)); }
-    }
-    followPath(S, st, spd * 0.75, dt);
   }
-  if (st.timer <= 0) startLeave(S);
+}
+
+// --------------------------- getting hit -------------------------------------
+function strike(S, p, how) {
+  const st = S.stalker;
+  if (p.carry) dropItem(S, p);
+  if (p.hidden) {
+    const out = standNear(S, p.hideX, p.hideY);
+    p.x = out.x; p.y = out.y;
+  }
+  p.snap++;
+  p.hidden = false; p.act = null; p.seenHide = false; p.bedSpot = -1; p.hideT = 0;
+  p.strikes++;
+  p.spd *= STRIKE_SLOW;
+  p.stun = 1.6;
+  st.rage = false; st.loop = null;
+  emit({ k: "hit", id: p.id, name: p.name, x: p.x, y: p.y, n: p.strikes, how });
+  if (p.strikes >= MAX_STRIKES) { startDefeat(S, p); return; }
+  emit({ k: "msg", to: p.id, text: how === "closet" ? "He ripped the closet open and dragged you out!" : how === "bed" ? "Your eyes were open. He pulled you out of bed!" : "He hit you!", c: "#ff1744", big: true });
+  emit({ k: "msg", to: p.id, text: "Strike " + p.strikes + " of " + MAX_STRIKES + ". You're slower now." + (MAX_STRIKES - p.strikes === 1 ? " One more and he takes you." : ""), c: "#ff8a80" });
+  st.state = "retreat"; st.target = null;
+  if (!goTo(st, SPOTS.holeIn.x, SPOTS.holeIn.y)) vanish(S, 25);
+}
+
+// --------------------------- the third strike --------------------------------
+// He drags you by the foot to the couch, puts the TV on, and stands behind you.
+// Then it's a coin toss: lights out for good, or he carries you back to bed and
+// the night starts over (and he's faster).
+function startDefeat(S, p) {
+  const st = S.stalker;
+  p.cut = true; p.hidden = false; p.act = null; p.text = null;
+  S.cut = { id: p.id, ph: "drag", t: 0 };
+  Object.assign(st, { state: "drag", target: p.id, rage: false, mode: "in", pause: 0 });
+  emit({ k: "drag", id: p.id, name: p.name, x: p.x, y: p.y });
+  emit({ k: "msg", text: p.name + " was caught for the third time...", c: "#ff1744", big: true });
+  if (!goTo(st, 11.5, 20.5)) st.path = [];
+}
+
+function updateCutscene(S, dt) {
+  const c = S.cut, st = S.stalker, p = S.players[c.id];
+  c.t += dt;
+  if (!p) { S.cut = null; goReturn(S); return; }
+  if (c.ph === "drag") {
+    const done = followPath(S, st, 1.25, dt) || c.t > 25;
+    // you slide along behind him, feet first
+    const dx = p.x - st.x, dy = p.y - st.y, d = Math.hypot(dx, dy);
+    if (d > 1.15) { p.x = st.x + dx / d * 1.15; p.y = st.y + dy / d * 1.15; }
+    p.a = Math.atan2(st.y - p.y, st.x - p.x); p.snap++;
+    if (done) {
+      c.ph = "tv"; c.t = 0;
+      for (const id in S.rooms) S.rooms[id].on = false;
+      S.tv = true;
+      p.x = SPOTS.couch.x; p.y = SPOTS.couch.y; p.a = -Math.PI / 2; p.snap++;
+      Object.assign(st, { x: SPOTS.behindCouch.x, y: SPOTS.behindCouch.y, a: -Math.PI / 2, path: [], state: "tv", spd: 0 });
+      emit({ k: "tvScene", id: p.id });
+    }
+  } else if (c.ph === "tv") {
+    if (c.t > 9) {
+      c.t = 0;
+      if (Math.random() < 0.5) { c.ph = "ko"; emit({ k: "knockout", id: p.id }); }
+      else {
+        c.ph = "carry"; st.state = "carry";
+        if (!goTo(st, 11.5, 8.5)) st.path = [];
+        emit({ k: "carry", id: p.id });
+      }
+    }
+  } else if (c.ph === "ko") {
+    if (c.t > 3) {
+      p.down = true; p.cut = false; S.cut = null; S.tv = false;
+      emit({ k: "msg", text: p.name + " was knocked out.", c: "#ff1744", big: true });
+      vanish(S, 30);
+    }
+  } else if (c.ph === "carry") {
+    const done = followPath(S, st, 1.4, dt) || c.t > 25;
+    p.x = st.x; p.y = st.y; p.a = st.a + Math.PI; p.snap++;
+    if (done) {
+      // back in bed. It's 9:00 PM again, and he's faster now.
+      S.resets++;
+      setupNight(S);
+      const bs = BED_SPOTS[0];
+      Object.assign(p, { hidden: "bed", bedSpot: 0, hideX: bs.x, hideY: bs.y, x: 11.5, y: 8.5, cut: false });
+      p.snap++;
+      emit({ k: "reset", id: p.id });
+    }
+  }
 }
 
 // --------------------------- creepy little things ---------------------------
-const TEXTS = [
-  "i can see you",
-  "why'd you turn the lights on? i like the dark",
-  "don't bother calling anyone. nobody's coming.",
-  "how many of you are in there? i counted {n}.",
-  "the {e} looks weak",
-  "it's cold out here. let me in.",
-  "check the closets",
-  "i've been inside before. while you were sleeping.",
-  "that flashlight won't last all night",
-  "sweet dreams :)",
-  "look outside",
-];
 function updateEvents(S, dt) {
-  if (S.aggr <= 0 || S.stage === "sleep" || S.stage === "morning") return;
+  if (S.cut || curfewOn(S)) return;
+  if (S.power) {
+    S.powerCD -= dt;
+    if (S.powerCD <= 0 && S.stalker.state !== "chase") {
+      S.power = false; S.powerCD = 9999;
+      emit({ k: "powerout" });
+      emit({ k: "msg", text: "The power went out. The fuse box is in the laundry room.", c: "#ff5252", big: true });
+    }
+  }
   S.nextEvent -= dt;
   if (S.nextEvent > 0) return;
-  S.nextEvent = rand(32, 58) - S.aggr * 5;
-  const alive = Object.values(S.players).filter((p) => !p.down);
-  const who = alive.length ? pick(alive).id : null;
+  S.nextEvent = rand(28, 50) - nightProgress(S) * 10;
+  const alive = Object.values(S.players).filter(active);
+  const who = alive.length ? pick(alive) : null;
   const winE = ENTRIES.filter((E) => E.kind === "window");
-  const ev = pick(["text", "text", "whisper", "steps", "scratch", "dog", "phantom", "flicker", "tv", "phone"]);
+  const ev = pick(["text", "text", "text", "whisper", "steps", "scratch", "dog", "phantom", "flicker", "tv", "phone", "knock"]);
   switch (ev) {
     case "scratch": { const E = pick(winE); emit({ k: "scratch", x: E.x + 0.5, y: E.y + 0.5 }); break; }
     case "phone": ring(S, null); break;
+    case "knock": knockAt(S, FRONT_DOOR); break;
     case "tv": if (!S.tv && S.power) { S.tv = true; emit({ k: "click", x: SPOTS.tv.x, y: SPOTS.tv.y }); emit({ k: "msg", text: "The TV turned on by itself.", c: "#b0bec5" }); } break;
     case "flicker": if (S.power) { S.flick = 1.8; emit({ k: "flicker" }); } break;
-    case "text": emit({ k: "text", to: who, text: pick(TEXTS).replace("{n}", S.n).replace("{e}", pick(ENTRIES).name.toLowerCase()) }); break;
-    case "whisper": emit({ k: "whisper", to: who }); break;
-    case "steps": emit({ k: "steps", x: rand(8, 22), y: rand(7, 20) }); break;
+    case "text": if (who && !who.text) sendText(S, who, pick(TEXTS.slice(1))); break;
+    case "whisper": if (who) emit({ k: "whisper", to: who.id }); break;
+    case "steps": emit({ k: "steps", x: rand(8, 20), y: rand(7, 21) }); break;
     case "dog": emit({ k: "dog" }); break;
-    case "phantom": emit({ k: "phantom", to: who }); break;
+    case "phantom": if (who && S.stalker.state === "away") emit({ k: "phantom", to: who.id }); break;
   }
 }

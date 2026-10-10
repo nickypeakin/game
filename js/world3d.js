@@ -291,7 +291,7 @@ function roomForFace(tx, ty) {
   if (r) return r;
   for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
     const c = tileAt(tx + dx, ty + dy);
-    if (c === "." || c === "a" || "bnCuzoeLvcsgASkOMrThwH".indexOf(c) >= 0) { const r2 = roomAt(tx + dx, ty + dy); if (r2) return r2; }
+    if (c === "." || c === "a" || "bnCuzoeLvcsgASkOMrThwHK".indexOf(c) >= 0) { const r2 = roomAt(tx + dx, ty + dy); if (r2) return r2; }
   }
   return ROOM_BY_ID.hall;
 }
@@ -346,6 +346,11 @@ function setup3D() {
     board: phong({ map: T.board }),
     rug: phong({ map: T.rug }),
     bin: phong({ color: 0x2f4a33, shininess: 30, emissive: 0x030503 }),
+    binRib: phong({ color: 0x253b29, shininess: 20 }),
+    safe: phong({ color: 0x3b4046, shininess: 70, specular: 0x556066 }),
+    paper: phong({ color: 0xf2eee0 }),
+    sticky: phong({ color: 0xffe866, emissive: 0x1a1600 }),
+    gold: phong({ color: 0xd8b04a, shininess: 100, specular: 0xffeeaa }),
     bag: phong({ color: 0x18181c, shininess: 90 }),
     lampshade: phong({ color: 0xf3e3c0, emissive: 0x000000 }),
   };
@@ -389,7 +394,12 @@ function setup3D() {
     else trim.box(E.x, 2.15, E.y, E.x + 1, WALL_H, E.y + 1);
   }
   for (const D of IDOORS) trim.box(D.x, 2.12, D.y, D.x + 1, WALL_H, D.y + 1);
-  for (let z = 0; z < MAP_H; z++) for (let x = 0; x < MAP_W; x++) if (tileAt(x, z) === "a") trim.box(x, 2.3, z, x + 1, WALL_H, z + 1);
+  for (let z = 0; z < MAP_H; z++) for (let x = 0; x < MAP_W; x++) {
+    if (tileAt(x, z) !== "a") continue;
+    trim.box(x, 2.15, z, x + 1, WALL_H, z + 1);
+    if (isWallTile(tileAt(x - 1, z))) { trim.box(x, 0, z, x + 0.1, 2.15, z + 1); trim.box(x + 0.9, 0, z, x + 1, 2.15, z + 1); }
+    else { trim.box(x, 0, z, x + 1, 2.15, z + 0.1); trim.box(x, 0, z + 0.9, x + 1, 2.15, z + 1); }
+  }
   for (const k in B) {
     const m = B[k].mesh(M[k]);
     if (!/^wp|siding|trim/.test(k)) m.castShadow = false;
@@ -416,6 +426,15 @@ function setup3D() {
   W3.held = new THREE.Group();
   W3.held.position.set(0.3, -0.3, -0.55);
   cam.add(W3.held);
+  W3.left = new THREE.Group();
+  W3.left.position.set(-0.24, -0.27, -0.42);
+  cam.add(W3.left);
+  W3.torch = makeItem("flashlight");
+  W3.left.add(W3.torch);
+  const skinMat = phong({ color: 0xc69c7c });
+  W3.handL = addBox(W3.left, 0.075, 0.05, 0.1, 0, -0.012, 0.03, skinMat);
+  W3.handR = addBox(W3.held, 0.075, 0.05, 0.1, 0.01, -0.04, 0.05, skinMat);
+  for (const h of [W3.handL, W3.handR]) h.castShadow = false;
   W3.heldKind = null;
   W3.menuS = newGame([]);
 }
@@ -470,20 +489,23 @@ function buildOutside(world, M, T) {
       addBox(world, w, 1.4, d, x + 0.5, 0, z + 0.5, M.fence);
     }
   }
-  // the dumpster, with its lid propped open
+  // the trash can in the backyard; its lid sits up on the bag once you've thrown it in
   for (const b of components("Z")) {
     const x = b.x0 + 0.5, z = b.y0 + 0.5;
-    addBox(world, 1.0, 1.0, 0.9, x, 0.08, z, M.bin);
-    for (const [wx, wz] of [[-0.4, -0.35], [0.4, -0.35], [-0.4, 0.35], [0.4, 0.35]]) addCyl(world, 0.05, 0.05, 0.08, x + wx, 0, z + wz, M.black, 6);
+    addCyl(world, 0.33, 0.29, 0.95, x, 0, z, M.bin, 16);
+    for (let i = 0; i < 3; i++) addCyl(world, 0.338, 0.338, 0.035, x, 0.18 + i * 0.3, z, M.binRib, 16);
+    addBox(world, 0.16, 0.04, 0.05, x, 0.82, z + 0.33, M.black);
     const lid = new THREE.Group();
-    lid.position.set(x, 1.08, z - 0.45);
-    addBox(lid, 1.04, 0.05, 0.94, 0, 0, 0.47, M.bin);
-    lid.rotation.x = -0.45;
+    lid.position.set(x, 0.95, z - 0.34);
+    addCyl(lid, 0.36, 0.36, 0.06, 0, 0, 0.34, M.bin, 16);
+    addBox(lid, 0.14, 0.05, 0.05, 0, 0.06, 0.34, M.black);
     world.add(lid);
     W3.binLid = lid;
-    W3.binBag = addBox(world, 0.42, 0.3, 0.42, x + 0.15, 0.95, z + 0.05, M.bag);
+    W3.binBag = new THREE.Mesh(new THREE.SphereGeometry(0.27, 10, 8), M.bag);
+    W3.binBag.scale.set(1, 0.6, 1); W3.binBag.position.set(x, 0.98, z);
+    world.add(W3.binBag);
   }
-  W3.binBag.visible = false;
+  if (W3.binBag) W3.binBag.visible = false;
   // trees
   for (const [tx, tz, s] of [[3, 3, 1.1], [3.5, 19.5, 1.0], [-9, 6, 1.3], [38, 9, 1.3], [-9, 24, 1.2], [37, 21, 1.1], [30.5, 0.5, 1.0]]) {
     addCyl(world, 0.12 * s, 0.18 * s, 2.4 * s, tx, 0, tz, M.bark, 7);
@@ -660,7 +682,7 @@ function buildFurniture(world, M, T) {
     const { g } = againstWall(world, b);
     addBox(g, 0.94, 2.25, 0.7, 0, 0, -0.14, M.closet);
   }
-  // the supply shelf in the laundry room: spare bulbs and planks
+  // the supply shelf in the laundry room: spare bulbs and old junk
   for (const b of components("L")) {
     const { g } = againstWall(world, b);
     for (const sx of [-0.45, 0.45]) addBox(g, 0.04, 2.0, 0.45, sx, 0, -0.25, M.midwood);
@@ -670,8 +692,7 @@ function buildFurniture(world, M, T) {
     addCyl(g, 0.08, 0.08, 0.16, 0.25, 1.63, -0.25, M.steel, 10);
     addCyl(g, 0.08, 0.08, 0.16, 0.05, 1.63, -0.22, M.steel, 10);
     W3.shelfBulbs = [0, 1, 2].map((i) => addBox(g, 0.1, 0.12, 0.1, -0.28 + i * 0.15, 0.63, -0.2, phong({ color: 0xf0e6c8 })));
-    W3.shelfPlanks = [];
-    for (let i = 0; i < 12; i++) W3.shelfPlanks.push(addBox(g, 0.86, 0.035, 0.13, 0, 0.11 + (i >> 1) * 0.04, -0.34 + (i % 2) * 0.16, M.board));
+    for (let i = 0; i < 3; i++) addBox(g, 0.3, 0.22, 0.3, -0.24 + i * 0.3, 0.11, -0.28, phong({ color: [0x8a6a44, 0x6d5a40, 0x9a7a54][i] }));
   }
   for (const b of components("u")) {
     const cx = (b.x0 + b.x1 + 1) / 2;
@@ -782,7 +803,7 @@ function buildFurniture(world, M, T) {
     }
     if (ch === "A") {
       for (const y of [0.3, 0.6]) addBox(g, 0.3, 0.03, 0.02, 0, y, 0.38, M.brass);
-      W3.battery = addBox(g, 0.12, 0.06, 0.06, 0, 0.91, 0, new THREE.MeshBasicMaterial({ color: 0xffd600 }));
+
     }
   }
   for (const b of components("r")) {
@@ -829,6 +850,40 @@ function buildFurniture(world, M, T) {
     W3.fuseLed.position.set(b.x0 + (nx > 0 ? 1.11 : -0.11), 1.8, b.y0 + 0.68);
     world.add(W3.fuseLed);
   }
+  // the safe in the laundry room: a keypad on the door, the front door key inside
+  for (const b of components("K")) {
+    const { g } = againstWall(world, b);
+    addBox(g, 0.64, 0.74, 0.56, 0, 0, -0.17, M.safe);
+    addBox(g, 0.5, 0.52, 0.02, 0, 0.1, 0.105, M.black);
+    W3.safeKey = makeItem("key");
+    W3.safeKey.position.set(0, 0.36, 0.06);
+    W3.safeKey.rotation.set(-1.2, 0, 0.3);
+    g.add(W3.safeKey);
+    const door = new THREE.Group();
+    door.position.set(-0.3, 0.06, 0.135);
+    addBox(door, 0.6, 0.62, 0.05, 0.3, 0, 0, M.safe);
+    addCyl(door, 0.05, 0.05, 0.04, 0.17, 0.33, 0.03, M.steel, 14).rotation.x = Math.PI / 2;
+    addBox(door, 0.15, 0.2, 0.02, 0.44, 0.3, 0.032, M.black);
+    for (let i = 0; i < 9; i++) addBox(door, 0.03, 0.025, 0.012, 0.405 + (i % 3) * 0.035, 0.33 + Math.floor(i / 3) * 0.04, 0.045, M.steel);
+    W3.safeLed = new THREE.Mesh(new THREE.SphereGeometry(0.012, 6, 4), new THREE.MeshBasicMaterial({ color: 0xff1744 }));
+    W3.safeLed.position.set(0.44, 0.47, 0.045);
+    door.add(W3.safeLed);
+    g.add(door);
+    W3.safeDoor = door;
+  }
+  // your clipboard on the kitchen counter, with the sticky note once your chores are done
+  W3.clip = makeItem("clipboard");
+  W3.clip.position.set(SPOTS.clipboard.x, SPOTS.clipboard.h, SPOTS.clipboard.y);
+  W3.clip.rotation.set(-Math.PI / 2, 0, 0.25);
+  world.add(W3.clip);
+  // spare batteries lying around the apartment
+  W3.batts = BATTERY_SPOTS.map((bs, i) => {
+    const m = makeItem("batteries");
+    m.position.set(bs.x, bs.h + 0.012, bs.y);
+    m.rotation.y = i * 1.7;
+    world.add(m);
+    return m;
+  });
   buildHole(world);
   // rugs, plants and pictures make it a home
   const rug = (w, d, x, z) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), M.rug); m.rotation.x = -Math.PI / 2; m.position.set(x, 0.006, z); m.receiveShadow = true; world.add(m); };
@@ -877,13 +932,15 @@ function buildHole(world) {
 }
 
 function buildEntries(world, M) {
-  const boardGeo = new THREE.BoxGeometry(1.3, 0.17, 0.045);
+  // doors are a bit narrower than the tile: casings fill in both sides
   const makeDoor = (g, mat) => {
     const hinge = new THREE.Group();
-    hinge.position.set(-0.47, 0, 0);
-    addBox(hinge, 0.94, 2.1, 0.06, 0.47, 0, 0, mat);
-    addBox(hinge, 0.06, 0.06, 0.16, 0.84, 1.0, 0, M.brass);
+    hinge.position.set(-0.43, 0, 0);
+    addBox(hinge, 0.86, 2.1, 0.06, 0.43, 0, 0, mat);
+    addBox(hinge, 0.06, 0.06, 0.16, 0.77, 1.0, 0, M.brass);
     g.add(hinge);
+    addBox(g, 0.07, 2.15, 1.0, -0.465, 0, 0, M.trim);
+    addBox(g, 0.07, 2.15, 1.0, 0.465, 0, 0, M.trim);
     return hinge;
   };
   W3.entries = ENTRIES.map((E) => {
@@ -893,7 +950,7 @@ function buildEntries(world, M) {
     if (!horiz) g.rotation.y = Math.PI / 2;
     world.add(g);
     const inSign = horiz ? -E.dy : -E.dx; // +1 when local +z points into the house
-    const o = { g, glass: null, shards: [], door: null, boards: [], E, rot: 0 };
+    const o = { g, glass: null, shards: [], door: null, E, rot: 0 };
     if (E.kind === "window") {
       o.glass = new THREE.Mesh(new THREE.PlaneGeometry(1, 1.15), M.glass);
       o.glass.position.set(0, 1.475, 0);
@@ -936,17 +993,6 @@ function buildEntries(world, M) {
       plate.rotation.y = inSign > 0 ? Math.PI : 0;
       o.door.add(plate);
     }
-    const heights = E.kind === "window" ? [1.15, 1.78, 1.47] : [0.6, 1.15, 1.72];
-    const tilts = E.kind === "window" ? [0.28, -0.3, 0.05] : [0.14, -0.12, 0.04];
-    for (let k = 0; k < MAX_BOARDS; k++) {
-      const b = new THREE.Mesh(boardGeo, M.board.clone());
-      b.position.set(0, heights[k], 0.44 * inSign);
-      b.rotation.z = tilts[k];
-      b.castShadow = b.receiveShadow = true;
-      b.visible = false;
-      g.add(b);
-      o.boards.push(b);
-    }
     o.base = { x: g.position.x, z: g.position.z };
     return o;
   });
@@ -975,7 +1021,7 @@ function buildEntries(world, M) {
 }
 
 function buildLights(scene, world, M) {
-  W3.hemi = new THREE.HemisphereLight(0x2a3a60, 0x0a0806, 0.2);
+  W3.hemi = new THREE.HemisphereLight(0x2a3450, 0x0a0806, 0.12);
   scene.add(W3.hemi);
   const moon = new THREE.DirectionalLight(0x8899cc, 0.12);
   moon.position.set(-20, 40, -30);
@@ -984,16 +1030,16 @@ function buildLights(scene, world, M) {
   W3.rooms = [];
   for (const r of ROOMS) {
     const lx = r.lights[0][0], lz = r.lights[0][1];
-    const l = new THREE.PointLight(0xffe4bd, 1.35, r.id === "hall" ? 11 : 9, 1.3);
+    const l = new THREE.PointLight(0xffbf7a, 0.85, r.id === "hall" ? 9 : 7.5, 1.5);
     l.position.set(lx, WALL_H - 0.35, lz);
     scene.add(l);
     const fixtures = r.lights.map(([fx, fz]) => {
-      const m = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xfff3dc }));
+      const m = new THREE.Mesh(new THREE.SphereGeometry(0.2, 12, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffd9a0 }));
       m.position.set(fx, WALL_H - 0.01, fz);
       world.add(m);
       return m;
     });
-    W3.rooms.push({ id: r.id, light: l, fixtures, base: 1.35 });
+    W3.rooms.push({ id: r.id, light: l, fixtures, base: 0.85 });
   }
   // the light by the front door, the courtyard's motion light, street lights.
   // Spotlights aimed away from the building, so they don't shine through its walls.
@@ -1064,7 +1110,47 @@ function makeItem(kind, n) {
     case "trash": { const b = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), M.bag); b.scale.set(1, 1.2, 1); b.position.y = -0.1; g.add(b); break; }
     case "bulb": { const s = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), new THREE.MeshBasicMaterial({ color: 0xfff6d8 })); s.position.y = 0.05; g.add(s); addCyl(g, 0.025, 0.025, 0.04, 0, -0.01, 0, M.steel, 8); break; }
     case "laundry": addBox(g, 0.32, 0.08, 0.26, 0, 0, 0, phong({ color: 0x7aa3d8 })); addBox(g, 0.3, 0.08, 0.24, 0, 0.08, 0, phong({ color: 0xe8e0d0 })); break;
-    case "plank": for (let i = 0; i < (n || 1); i++) { const b = addBox(g, 0.12, 0.04, 1.0, 0.0, i * 0.045, -0.2, M.board); b.rotation.y = 0.2; } break;
+    case "clipboard": {
+      // a hardboard clipboard: the chore list, and a sticky note once you're done
+      addBox(g, 0.23, 0.32, 0.008, 0, -0.16, 0, phong({ color: 0x8a5a32 }));
+      addBox(g, 0.2, 0.27, 0.002, 0, -0.17, 0.005, M.paper);
+      for (let i = 0; i < 6; i++) addBox(g, 0.15 - (i % 3) * 0.02, 0.006, 0.001, -0.015, -0.08 - i * 0.032, 0.0065, phong({ color: 0x3a3a46 }));
+      addBox(g, 0.09, 0.03, 0.02, 0, -0.012, 0.008, M.steel);
+      const note = addBox(g, 0.07, 0.07, 0.002, 0.055, -0.27, 0.0075, M.sticky);
+      note.rotation.z = -0.12;
+      g.userData.note = note;
+      break;
+    }
+    case "key": {
+      addCyl(g, 0.018, 0.018, 0.006, 0, 0, 0, M.gold, 12).rotation.x = Math.PI / 2;
+      addBox(g, 0.008, 0.055, 0.004, 0, -0.04, 0, M.gold);
+      addBox(g, 0.012, 0.006, 0.004, 0.008, -0.055, 0, M.gold);
+      addBox(g, 0.01, 0.006, 0.004, 0.007, -0.042, 0, M.gold);
+      break;
+    }
+    case "batteries": {
+      // a pair of AA batteries
+      for (const dx of [-0.009, 0.009]) {
+        const b = addCyl(g, 0.0075, 0.0075, 0.05, dx, 0, 0, phong({ color: 0x1f6f3a, shininess: 60 }), 10);
+        b.rotation.z = Math.PI / 2; b.position.set(0, 0.0075, dx);
+        const tip = addCyl(g, 0.003, 0.003, 0.004, 0.027, 0.0045, dx, M.steel, 6);
+        tip.rotation.z = Math.PI / 2;
+      }
+      break;
+    }
+    case "flashlight": {
+      // black aluminium body pointing forward, with a battery gauge along its side
+      const body = phong({ color: 0x1a1b1e, shininess: 70, specular: 0x444a52 });
+      const tube = addCyl(g, 0.017, 0.017, 0.17, 0, 0, 0, body, 12); tube.rotation.x = Math.PI / 2; tube.position.set(0, 0, 0.0);
+      const head = addCyl(g, 0.026, 0.019, 0.045, 0, 0, 0, body, 14); head.rotation.x = Math.PI / 2; head.position.set(0, 0, -0.105);
+      const lens = new THREE.Mesh(new THREE.CircleGeometry(0.022, 14), new THREE.MeshBasicMaterial({ color: 0x444444 }));
+      lens.position.set(0, 0, -0.1285); lens.rotation.y = Math.PI; g.add(lens);
+      for (let i = 0; i < 5; i++) { const r = addCyl(g, 0.0175, 0.0175, 0.004, 0, 0, 0, M.steel, 12); r.rotation.x = Math.PI / 2; r.position.set(0, 0, 0.02 + i * 0.012); }
+      const leds = [];
+      for (let i = 0; i < 4; i++) { const l = addBox(g, 0.005, 0.004, 0.012, 0.0185, -0.002, -0.05 + i * 0.016, new THREE.MeshBasicMaterial({ color: 0x00e676 })); leds.push(l); }
+      g.userData.leds = leds; g.userData.lens = lens;
+      break;
+    }
     case "handset": {
       // the landline receiver, held up to your ear
       addBox(g, 0.06, 0.05, 0.24, 0, 0, 0, M.red);
@@ -1080,57 +1166,130 @@ function makeItem(kind, n) {
   return g;
 }
 
-
 // ------------------------------ characters ---------------------------------
+// The thing in the wall: very tall and thin, in rags, with a pale mask full of holes.
+function maskTex() {
+  return ctex(128, 160, (g, w, h) => {
+    const grd = g.createRadialGradient(w / 2, h * 0.45, 10, w / 2, h / 2, w * 0.7);
+    grd.addColorStop(0, "#e2d9c4"); grd.addColorStop(1, "#9c907a");
+    g.fillStyle = grd; g.fillRect(0, 0, w, h);
+    speckle(g, w, h, 400, "rgba(70,50,30,0.12)", 2);
+    g.fillStyle = "rgba(90,60,40,0.3)"; for (let i = 0; i < 6; i++) g.fillRect(w * (0.25 + srand() * 0.5), h * 0.5, 2, h * (0.15 + srand() * 0.3)); // drips
+    // two eye holes with a shadow inside
+    for (const ex of [0.32, 0.68]) {
+      g.fillStyle = "rgba(60,40,30,0.5)"; g.beginPath(); g.ellipse(w * ex, h * 0.4, 15, 11, 0, 0, 7); g.fill();
+      g.fillStyle = "#030202"; g.beginPath(); g.ellipse(w * ex, h * 0.4, 11, 8, ex < 0.5 ? 0.2 : -0.2, 0, 7); g.fill();
+    }
+    // small holes punched all over it
+    g.fillStyle = "#050303";
+    for (let i = 0; i < 70; i++) {
+      const x = w * (0.15 + srand() * 0.7), y = h * (0.1 + srand() * 0.82);
+      if (Math.hypot(x - w * 0.32, y - h * 0.4) < 18 || Math.hypot(x - w * 0.68, y - h * 0.4) < 18) continue;
+      g.beginPath(); g.arc(x, y, 1.2 + srand() * 1.6, 0, 7); g.fill();
+    }
+    // a stitched row of holes for the mouth
+    for (let i = 0; i < 9; i++) { g.beginPath(); g.arc(w * (0.3 + i * 0.05), h * 0.74 + Math.sin(i * 1.3) * 2, 2.4, 0, 7); g.fill(); }
+    g.strokeStyle = "rgba(40,30,20,0.6)"; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(w * 0.55, 0); g.lineTo(w * 0.5, h * 0.2); g.lineTo(w * 0.58, h * 0.32); g.stroke();
+    // cut the mask out as an oval
+    g.globalCompositeOperation = "destination-in";
+    g.beginPath(); g.ellipse(w / 2, h / 2, w * 0.46, h * 0.48, 0, 0, 7); g.fill();
+    g.globalCompositeOperation = "source-over";
+  });
+}
+function ragTex() {
+  // dark cloth that gets more torn towards the bottom (transparent gaps)
+  const t = ctex(128, 128, (g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    for (let x = 0; x < w; x += 4) {
+      const len = h * (0.55 + srand() * 0.45);
+      const v = 9 + srand() * 10;
+      g.fillStyle = `rgb(${v + 6},${v + 2},${v})`;
+      g.fillRect(x, 0, 4, len);
+    }
+    for (let i = 0; i < 40; i++) { g.clearRect(srand() * w, h * (0.3 + srand() * 0.6), 2 + srand() * 6, 3 + srand() * 10); }
+    speckle(g, w, h * 0.6, 300, "rgba(60,45,35,0.4)", 2);
+  });
+  t.wrapS = THREE.RepeatWrapping; t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
 function makeStalker() {
   const g = new THREE.Group();
-  const black = phong({ color: 0x09090b, shininess: 4 });
-  const mask = phong({ color: 0xd8cfbe, shininess: 30 });
-  const hole = new THREE.MeshBasicMaterial({ color: 0x000000 });
-  const eye = new THREE.MeshBasicMaterial({ color: 0xff3020 });
-  const parts = {};
+  if (!W3.monsterMats) {
+    const rag = ragTex();
+    W3.monsterMats = {
+      skin: phong({ color: 0x3a3430, shininess: 6 }),
+      cloth: phong({ color: 0x2b2724, shininess: 3 }),
+      rag: phong({ map: rag, alphaTest: 0.5, side: THREE.DoubleSide, shininess: 2 }),
+      mask: phong({ map: maskTex(), shininess: 18, side: THREE.DoubleSide, alphaTest: 0.5 }),
+      hole: new THREE.MeshBasicMaterial({ color: 0x000000 }),
+      eye: new THREE.MeshBasicMaterial({ color: 0xff3020 }),
+      hair: phong({ color: 0x0a0909, side: THREE.DoubleSide }),
+    };
+  }
+  const Mm = W3.monsterMats;
   const body = new THREE.Group();
   g.add(body);
-  const legL = addCyl(body, 0.055, 0.06, 0.55, -0.1, 0, 0, black, 6);
-  const legR = addCyl(body, 0.055, 0.06, 0.55, 0.1, 0, 0, black, 6);
-  addCyl(body, 0.17, 0.32, 1.15, 0, 0.42, 0, black, 10);
-  addBox(body, 0.56, 0.22, 0.24, 0, 1.47, 0, black);
-  addCyl(body, 0.05, 0.06, 0.16, 0, 1.68, 0.02, black, 6);
-  const head = new THREE.Group();
-  head.position.set(0, 1.92, 0.04);
-  body.add(head);
-  const hood = new THREE.Mesh(new THREE.SphereGeometry(0.15, 12, 10), black);
-  hood.scale.set(1, 1.15, 1);
-  hood.castShadow = true;
-  head.add(hood);
-  const face = new THREE.Mesh(new THREE.SphereGeometry(0.125, 12, 10), mask);
-  face.scale.set(0.85, 1.1, 0.55);
-  face.position.set(0, -0.01, 0.085);
-  head.add(face);
+  // long thin legs in torn trousers
+  const legs = [];
   for (const s of [-1, 1]) {
-    const h = new THREE.Mesh(new THREE.SphereGeometry(0.026, 8, 6), hole);
-    h.position.set(s * 0.045, 0.025, 0.145);
-    head.add(h);
-    const e = new THREE.Mesh(new THREE.SphereGeometry(0.011, 6, 4), eye);
-    e.position.set(s * 0.045, 0.025, 0.163);
-    head.add(e);
+    const hip = new THREE.Group(); hip.position.set(s * 0.11, 1.02, 0); body.add(hip);
+    addCyl(hip, 0.055, 0.065, 0.55, 0, -0.55, 0, Mm.cloth, 8);
+    const knee = new THREE.Group(); knee.position.set(0, -0.55, 0); hip.add(knee);
+    addCyl(knee, 0.045, 0.055, 0.47, 0, -0.47, 0, Mm.cloth, 8);
+    addBox(knee, 0.09, 0.05, 0.2, 0, -0.5, 0.04, Mm.skin);
+    legs.push({ hip, knee });
   }
-  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.012, 0.01), hole);
-  mouth.position.set(0, -0.07, 0.15);
-  head.add(mouth);
+  // torso under a long, ripped coat
+  const torso = new THREE.Group(); torso.position.set(0, 1.0, 0); body.add(torso);
+  addCyl(torso, 0.17, 0.13, 0.62, 0, 0, 0, Mm.cloth, 10);
+  addBox(torso, 0.48, 0.1, 0.2, 0, 0.6, 0, Mm.cloth);
+  const coat = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.3, 1.12, 16, 1, true), Mm.rag);
+  coat.position.y = 0.1; torso.add(coat);
+  for (let i = 0; i < 7; i++) {
+    const strip = new THREE.Mesh(new THREE.PlaneGeometry(0.08 + (i % 3) * 0.03, 0.35 + (i % 4) * 0.12), Mm.rag);
+    const a = (i / 7) * Math.PI * 2;
+    strip.position.set(Math.sin(a) * 0.29, -0.5 - (i % 4) * 0.05, Math.cos(a) * 0.29);
+    strip.rotation.y = a;
+    torso.add(strip);
+  }
+  // a thin neck and a head tilted at a wrong angle
+  addCyl(torso, 0.045, 0.055, 0.2, 0, 0.66, 0.02, Mm.skin, 6);
+  const head = new THREE.Group(); head.position.set(0, 0.97, 0.05); head.scale.setScalar(1.18); torso.add(head);
+  const skull = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 10), Mm.hair);
+  skull.scale.set(1, 1.18, 1); head.add(skull);
+  const mg = new THREE.PlaneGeometry(0.21, 0.27, 8, 8);
+  const pos = mg.attributes.position;
+  for (let i = 0; i < pos.count; i++) { const x = pos.getX(i), y = pos.getY(i); pos.setZ(i, -(x * x) * 6.5 - (y * y) * 2.2); }
+  mg.computeVertexNormals();
+  const mask = new THREE.Mesh(mg, Mm.mask);
+  mask.position.set(0, -0.01, 0.158); head.add(mask);
+  for (const s of [-1, 1]) {
+    const e = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 4), Mm.eye);
+    e.position.set(s * 0.038, 0.016, 0.132); head.add(e);
+  }
+  // stringy hair hanging over the back and sides
+  for (let i = 0; i < 9; i++) {
+    const strand = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.32 + (i % 3) * 0.08), Mm.hair);
+    const a = Math.PI * (0.06 + (i / 8) * 0.88); // the back half of the head
+    strand.position.set(Math.cos(a) * 0.12, -0.1, -Math.sin(a) * 0.12 + 0.01);
+    strand.rotation.y = -a + Math.PI / 2;
+    head.add(strand);
+  }
+  // arms too long for its body, hands like hooks
   const arms = [];
   for (const s of [-1, 1]) {
-    const a = new THREE.Group();
-    a.position.set(s * 0.3, 1.52, 0);
-    const arm = addCyl(a, 0.04, 0.05, 1.0, 0, -1.0, 0, black, 6);
-    arm.castShadow = true;
-    for (let f = 0; f < 3; f++) addBox(a, 0.015, 0.16, 0.015, (f - 1) * 0.025, -1.17, 0.02, black);
-    body.add(a);
-    arms.push(a);
+    const sh = new THREE.Group(); sh.position.set(s * 0.25, 0.6, 0); torso.add(sh);
+    addCyl(sh, 0.045, 0.05, 0.52, 0, -0.52, 0, Mm.cloth, 6);
+    const el = new THREE.Group(); el.position.set(0, -0.52, 0); sh.add(el);
+    addCyl(el, 0.035, 0.042, 0.5, 0, -0.5, 0, Mm.skin, 6);
+    const sleeve = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.3), Mm.rag);
+    sleeve.position.set(s * 0.04, -0.2, 0); sleeve.rotation.y = s * Math.PI / 2; el.add(sleeve);
+    for (let f = 0; f < 4; f++) { const fg = addBox(el, 0.012, 0.16, 0.012, (f - 1.5) * 0.018, -0.66, 0.02, Mm.skin); fg.rotation.x = -0.35; }
+    arms.push({ sh, el });
   }
   g.traverse((m) => { if (m.isMesh) m.castShadow = true; });
-  Object.assign(parts, { body, head, legL, legR, arms });
-  return { group: g, parts, last: new THREE.Vector3(), phase: 0 };
+  return { group: g, parts: { body, torso, head, legs, arms }, last: new THREE.Vector3(), phase: 0, twitch: 0, tw: 0 };
 }
 
 function makePlayerModel(color) {
@@ -1168,28 +1327,40 @@ function lieAngle(x, y, a) {
   return a;
 }
 
+// walking, running, standing still; with a twitchy, wrong-looking head
 function poseStalker(model, x, z, a, t, opts) {
   const g = model.group, p = model.parts;
   const moved = Math.hypot(x - model.last.x, z - model.last.z);
   model.last.set(x, 0, z);
-  model.phase += Math.min(moved, 0.2) * 5;
+  const spd = opts.spd != null ? opts.spd : moved * 60;
+  const run = clamp((spd - 2.2) / 1.6, 0, 1);
+  model.phase += Math.min(moved, 0.25) * (run > 0.5 ? 3.6 : 4.4);
   g.position.set(x, 0, z);
   g.rotation.y = faceYaw(a);
-  const sw = Math.sin(model.phase);
-  p.legL.rotation.x = sw * 0.4; p.legR.rotation.x = -sw * 0.4;
-  p.body.position.y = Math.abs(Math.cos(model.phase)) * 0.03;
+  const sw = Math.sin(model.phase), moving = spd > 0.2 ? 1 : 0;
+  p.legs.forEach((L, i) => {
+    const s = (i ? -sw : sw) * moving;
+    L.hip.rotation.x = s * (0.45 + run * 0.35);
+    L.knee.rotation.x = Math.max(0, -s) * (0.6 + run * 0.6) + 0.08;
+  });
+  p.body.position.y = moving ? Math.abs(Math.cos(model.phase)) * (0.03 + run * 0.04) : Math.sin(t * 1.4) * 0.008;
+  p.torso.rotation.x = 0.16 + run * 0.32 + (opts.carry ? 0.15 : 0);
   const bang = opts.bang || 0;
-  for (let i = 0; i < 2; i++) {
-    const arm = p.arms[i];
-    arm.rotation.x = bang > 0 ? -1.6 * Math.sin((1 - bang / 0.4) * Math.PI) : (i ? -sw : sw) * 0.25 + Math.sin(t * 1.3 + i) * 0.04;
-    arm.rotation.z = (i ? -1 : 1) * 0.06;
-  }
-  p.body.rotation.x = 0.12; // hunched
-  p.head.rotation.z = Math.sin(t * 0.7) * 0.25 + (opts.stun ? (Math.random() - 0.5) * 0.6 : 0);
-  p.head.rotation.x = opts.stun ? (Math.random() - 0.5) * 0.4 : -0.1;
+  p.arms.forEach((A, i) => {
+    const s = (i ? -sw : sw) * moving;
+    A.sh.rotation.x = bang > 0 ? -1.7 * Math.sin((1 - bang / 0.4) * Math.PI) : opts.reach ? -1.2 : s * (0.25 + run * 0.7) + Math.sin(t * 1.1 + i) * 0.05;
+    A.sh.rotation.z = (i ? -1 : 1) * (0.08 + (opts.carry && i ? 0.5 : 0));
+    A.el.rotation.x = -0.25 - run * 0.4;
+  });
+  // the head: slow lolling, and every so often a sudden jerk to one side
+  model.twitch -= 1 / 60;
+  if (model.twitch <= 0) { model.twitch = 1 + Math.random() * 3; model.tw = (Math.random() - 0.5) * 1.1; model.twHold = 0.25; }
+  model.twHold = Math.max(0, (model.twHold || 0) - 1 / 60);
+  p.head.rotation.z = Math.sin(t * 0.6) * 0.2 + (model.twHold > 0 ? model.tw * 0.7 : 0);
+  p.head.rotation.x = -0.15 - run * 0.2;
+  p.head.rotation.y = opts.look || 0;
 }
 
-// ------------------------------ per-frame ----------------------------------
 // ------------------------------ per-frame ----------------------------------
 function lerpTo(cur, target, k) { return cur + (target - cur) * k; }
 
@@ -1200,7 +1371,7 @@ function updateWorld(S, t, dt) {
     const st = S.rooms[r.id];
     const on = S.power && !flick && st.on && st.bulb;
     r.light.intensity = on ? r.base : 0;
-    for (const f of r.fixtures) f.material.color.setHex(on ? 0xfff3dc : st.bulb ? 0x34312c : 0x1c1b18);
+    for (const f of r.fixtures) f.material.color.setHex(on ? 0xffd9a0 : st.bulb ? 0x34312c : 0x1c1b18);
   }
   if (W3.nightLamp) W3.nightLamp.material.emissive.setHex(S.power && S.rooms.bed1.on ? 0x6a5a40 : 0x000000);
   // outside lights: porch light runs on the house power; the yard light is motion-activated
@@ -1211,20 +1382,27 @@ function updateWorld(S, t, dt) {
   W3.yardLight.light.intensity = lerpTo(W3.yardLight.light.intensity, motion ? 2.4 : 0, k);
   W3.yardLight.fix.material.color.setHex(motion ? 0xf2f6ff : 0x2a2a2e);
   W3.fuseLed.material.color.setHex(S.power ? 0x00ff66 : (Math.floor(t * 3) % 2 ? 0xff1744 : 0x220000));
-  if (W3.battery) W3.battery.visible = S.batteries > 0;
   // light switches flip up and down
   W3.switches.forEach((s) => { const on = S.rooms[s.room].on; s.nub.position.y = on ? -0.012 : -0.034; s.nub.rotation.x = on ? -0.4 : 0.4; });
   // chore props
   W3.canBag.visible = S.trash === "can";
-  W3.binBag.visible = S.trash === "bin";
+  if (W3.binBag) { W3.binBag.visible = S.trash === "bin"; W3.binLid.rotation.x = S.trash === "bin" ? -0.45 : 0; }
+  W3.clip.visible = S.clip === "counter";
+  W3.clip.userData.note.visible = !!S.note;
+  W3.batts.forEach((m, i) => (m.visible = !!(S.batts[i] && S.batts[i].here)));
+  if (W3.safeDoor) {
+    W3.safeOpen = lerpTo(W3.safeOpen || 0, S.safe.open ? -1.75 : 0, k);
+    W3.safeDoor.rotation.y = W3.safeOpen;
+    W3.safeLed.material.color.setHex(S.safe.open ? 0x00e676 : 0xff1744);
+    W3.safeKey.visible = S.safe.key === "safe";
+  }
   W3.tablePlate.visible = !!S.plateOnTable;
   if (W3.laundry) W3.laundry.visible = S.laundry === "basket";
-  if (W3.shelfPlanks) W3.shelfPlanks.forEach((m, i) => (m.visible = i < S.closet.planks));
-  if (W3.shelfBulbs) W3.shelfBulbs.forEach((m, i) => (m.visible = i < S.closet.bulbs));
-  // the hole in the bathroom wall grows every night
-  const hs = [0, 0.12, 0.5, 1][S.night] || 1;
+  if (W3.shelfBulbs) W3.shelfBulbs.forEach((m, i) => (m.visible = i < S.shelf.bulbs));
+  // the hole in the bathroom wall: big enough for something to crawl out of
+  const hs = 0.85 + nightProgress(S) * 0.25;
   W3.hole.dark.scale.setScalar(hs);
-  W3.hole.plaster.scale.setScalar(S.night > 1 ? hs * 1.05 : 0.001);
+  W3.hole.plaster.scale.setScalar(hs * 1.05);
   W3.hole.cracks.scale.setScalar(0.5 + hs * 0.7);
   W3.microPlate.visible = S.micro.st !== "off";
   W3.microWin.material.color.setHex(S.micro.st === "cooking" ? 0xffcf6a : 0x111111);
@@ -1243,7 +1421,7 @@ function updateWorld(S, t, dt) {
   // the phone rattles when it rings
   W3.phone.position.x = W3.phonePos.x + (S.phone > 0 ? (Math.random() - 0.5) * 0.02 : 0);
   W3.phone.rotation.y = S.phone > 0 ? (Math.random() - 0.5) * 0.15 : 0;
-  // doors, windows, boards
+  // doors and windows
   W3.entries.forEach((o, i) => {
     const e = S.entries[i];
     const j = e.hit > 0 ? e.hit * 0.025 : 0;
@@ -1258,10 +1436,6 @@ function updateWorld(S, t, dt) {
       o.chainOn.visible = e.locked && !e.open && !e.broken;
       o.chainOff.visible = !o.chainOn.visible;
     }
-    o.boards.forEach((b, n) => {
-      b.visible = n < e.boards;
-      b.material.color.setHex(n === e.boards - 1 && e.bhp < 55 ? 0x8a7a6a : 0xffffff);
-    });
   });
   W3.idoors.forEach((o, i) => { o.rot = lerpTo(o.rot, S.idoors[i].open ? o.openRot : 0, k); o.hinge.rotation.y = o.rot; });
 }
@@ -1275,12 +1449,12 @@ function setHeld(group, holder, kind, n) {
 }
 
 function updateCharacters(S, me, G, t) {
-  const sr = G.stR, st = W3.stalker;
-  st.group.visible = S.stalker.state !== "away";
-  if (st.group.visible) poseStalker(st, sr.x, sr.y, sr.a, t, { stun: S.stalker.stun, bang: G.stBang || 0 });
+  const sr = G.stR, st = W3.stalker, ss = S.stalker;
+  st.group.visible = ss.state !== "away" && ss.state !== "rageAway";
+  if (st.group.visible) poseStalker(st, sr.x, sr.y, sr.a, t, { spd: ss.spd, bang: G.stBang || 0, carry: ss.state === "carry", reach: ss.state === "window" || ss.state === "tv" });
   if (G.phantom) {
     W3.phantom.group.visible = true;
-    poseStalker(W3.phantom, G.phantom.x, G.phantom.y, G.phantom.a, t, {});
+    poseStalker(W3.phantom, G.phantom.x, G.phantom.y, G.phantom.a, t, { spd: 0 });
   } else W3.phantom.group.visible = false;
   // other players
   const seen = {};
@@ -1289,26 +1463,45 @@ function updateCharacters(S, me, G, t) {
     seen[p.id] = true;
     const r = G.rpos[p.id] || { x: p.x, y: p.y, a: p.a };
     const m = W3.players[p.id] || (W3.players[p.id] = makePlayerModel(p.color));
-    m.group.visible = !p.hidden;
+    m.group.visible = !p.hidden && !p.escaped && !p.down;
     const moved = Math.hypot(r.x - m.last.x, r.y - m.last.z);
     m.last.set(r.x, 0, r.y);
     m.phase += Math.min(moved, 0.2) * 7;
-    if (p.down) {
-      if (m.lieA == null) m.lieA = lieAngle(r.x, r.y, r.a);
-      const la = m.lieA;
-      m.group.position.set(r.x + Math.cos(la) * 0.85, 0.18, r.y + Math.sin(la) * 0.85);
+    const cut = S.cut && S.cut.id === p.id ? S.cut.ph : null;
+    if (cut === "drag") {
+      // on the floor, being pulled by the foot
+      const la = Math.atan2(sr.y - r.y, sr.x - r.x);
+      m.group.position.set(r.x - Math.cos(la) * 0.85, 0.18, r.y - Math.sin(la) * 0.85);
       m.group.rotation.set(-Math.PI / 2, faceYaw(la), 0, "YXZ");
+    } else if (cut === "tv" || cut === "ko") {
+      m.group.position.set(SPOTS.couch.x, -0.35, SPOTS.couch.y);
+      m.group.rotation.set(0, faceYaw(-Math.PI / 2), 0, "YXZ");
+    } else if (cut === "carry") {
+      // over his shoulder
+      m.group.position.set(sr.x + Math.cos(sr.a + 1.57) * 0.15, 1.55, sr.y + Math.sin(sr.a + 1.57) * 0.15);
+      m.group.rotation.set(Math.PI / 2, faceYaw(sr.a + Math.PI / 2), 0, "YXZ");
     } else {
-      m.lieA = null;
       m.group.position.set(r.x, Math.abs(Math.sin(m.phase)) * 0.04, r.y);
       m.group.rotation.set(0, faceYaw(r.a), 0, "YXZ");
     }
-    setHeld(m.hand, m, p.down ? null : p.carry, p.carryN);
+    setHeld(m.hand, m, cut ? null : p.carry);
   }
   for (const id in W3.players) if (!seen[id]) { W3.scene.remove(W3.players[id].group); delete W3.players[id]; }
-  // what you're holding
-  setHeld(W3.held, W3, me.down || me.hidden ? null : G.call ? "handset" : me.carry, me.carryN);
+  // what you're holding: one thing in your right hand, the flashlight in your left
+  const busy = me.hidden || me.cut || me.escaped || me.down || (me.act && me.act.kind === "eat");
+  setHeld(W3.held, W3, busy ? null : G.call ? "handset" : me.carry);
+  W3.handR.visible = !busy && !!(me.carry || G.call);
   W3.held.position.y = -0.3 + (G.bob || 0) * 0.6;
+  const showTorch = !busy && !G.phone;
+  W3.left.visible = showTorch || (G.watchT > 0 && !busy);
+  W3.torch.visible = showTorch;
+  W3.left.position.y = -0.27 + (G.bob || 0) * 0.5;
+  const leds = W3.torch.userData.leds, bat = me.bat || 0;
+  leds.forEach((l, i) => {
+    const lit = bat > i * 25 + 1;
+    l.material.color.setHex(!lit ? 0x1a1a1a : bat > 50 ? 0x00e676 : bat > 25 ? 0xffd600 : 0xff1744);
+  });
+  W3.torch.userData.lens.material.color.setHex(flashOn(me) ? 0xfff6dc : 0x333333);
 }
 const opts3d = { menu: false };
 
@@ -1317,7 +1510,7 @@ function updateFlashlights(S, me, G, t) {
   const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
   const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
   const f0 = W3.flash[0];
-  f0.position.copy(cam.position).addScaledVector(right, 0.22).add(new THREE.Vector3(0, -0.28, 0)).addScaledVector(fwd, 0.15);
+  f0.position.copy(cam.position).addScaledVector(right, -0.22).add(new THREE.Vector3(0, -0.26, 0)).addScaledVector(fwd, 0.25);
   f0.target.position.copy(cam.position).addScaledVector(fwd, 6);
   const on = !opts3d.menu && flashOn(me);
   f0.intensity = on ? (me.bat < 15 && Math.random() < 0.25 ? 0.4 : 2.3) : 0;
@@ -1342,12 +1535,34 @@ function updateFlashlights(S, me, G, t) {
 function placeCamera(S, me, G, t) {
   const cam = W3.camera;
   let x = me.x, z = me.y, y = EYE_H + (G.bob || 0), roll = 0;
-  if (me.hidden) {
-    const under = tileAt(Math.floor(me.hideX), Math.floor(me.hideY)) === "b";
-    x = me.hideX; z = me.hideY; y = under ? 0.22 : 1.45;
-  } else if (me.down) { y = 0.35; roll = 0.45; }
+  let yaw = -me.a - Math.PI / 2, pitch = me.pitch || 0;
+  const cut = S.cut && S.cut.id === me.id ? S.cut : null;
+  const sr = G.stR;
+  if (cut && cut.ph === "drag") {
+    // on your back, being dragged feet first: you see him over your feet
+    const la = Math.atan2(sr.y - me.y, sr.x - me.x);
+    x = me.x - Math.cos(la) * 0.7; z = me.y - Math.sin(la) * 0.7; y = 0.32 + Math.sin(t * 7) * 0.02;
+    yaw = -la - Math.PI / 2; pitch = 0.35; roll = Math.sin(t * 3.1) * 0.12;
+  } else if (cut && (cut.ph === "tv" || cut.ph === "ko")) {
+    x = SPOTS.couch.x; z = SPOTS.couch.y; y = 1.05;
+  } else if (cut && cut.ph === "carry") {
+    // slung over his shoulder, looking down his back at the floor going by
+    x = sr.x - Math.cos(sr.a) * 0.35; z = sr.y - Math.sin(sr.a) * 0.35; y = 1.75;
+    yaw = -(sr.a + Math.PI) - Math.PI / 2; pitch = -0.95; roll = Math.sin(t * 4) * 0.05;
+  } else if (me.hidden === "bed") {
+    // lying on your back, head on the pillow
+    const bs = BED_SPOTS[me.bedSpot] || { x: me.hideX, y: me.hideY, a: 0 };
+    x = bs.x - Math.cos(bs.a) * 0.55; z = bs.y - Math.sin(bs.a) * 0.55; y = 0.74;
+  } else if (me.hidden === "closet") {
+    x = me.hideX; z = me.hideY; y = 1.45;
+  } else if (me.act && me.act.kind === "eat") {
+    y = 1.12; // sitting at the table
+  } else if (me.stun > 0) {
+    const k = Math.min(1, me.stun / 1.6);
+    y = EYE_H - 0.55 * k; roll = 0.35 * k; pitch -= 0.3 * k;
+  }
   cam.position.set(x + (G.shakeX || 0), y + (G.shakeY || 0), z);
-  cam.rotation.set(me.pitch || 0, -me.a - Math.PI / 2, roll);
+  cam.rotation.set(pitch, yaw, roll);
   cam.updateMatrixWorld();
 }
 
@@ -1356,13 +1571,15 @@ function poseScare(G, t) {
   const cam = W3.camera, k = G.scare / 1.4;
   const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(cam.quaternion);
   const dist = 0.55 + (k - 0.6) * 0.6;
-  const px = cam.position.x + fwd.x * Math.max(0.35, dist), pz = cam.position.z + fwd.z * Math.max(0.35, dist);
+  // his mask sits right where you're looking, even when you're knocked low or looking down
+  const d = Math.max(0.62, dist);
+  const px = cam.position.x + fwd.x * d, pz = cam.position.z + fwd.z * d;
   const st = W3.stalker;
   st.group.visible = true;
-  st.group.position.set(px, cam.position.y - 1.9 + (Math.random() - 0.5) * 0.04, pz);
+  st.group.position.set(px, cam.position.y + fwd.y * d - 2.0 + (Math.random() - 0.5) * 0.04, pz);
   st.group.rotation.y = Math.atan2(cam.position.x - px, cam.position.z - pz);
   st.parts.head.rotation.z = (Math.random() - 0.5) * 0.5;
-  st.parts.arms.forEach((a) => (a.rotation.x = -2.2));
+  st.parts.arms.forEach((A) => { A.sh.rotation.x = -2.0; A.el.rotation.x = -0.6; });
   W3.scareLight.position.set(cam.position.x + fwd.x * 0.2, cam.position.y + 0.1, cam.position.z + fwd.z * 0.2);
   W3.scareLight.intensity = 2.5;
 }
@@ -1374,7 +1591,13 @@ function renderGame(S, me, G, t, dt) {
   placeCamera(S, me, G, t);
   updateCharacters(S, me, G, t);
   W3.scareLight.intensity = 0;
-  if (G.scare > 0 && me.down) poseScare(G, t);
+  if (S.stalker && S.stalker.state === "tv" && G.stR) {
+    // standing behind the couch in the dark: a faint red glow on his mask, so you can just make him out
+    const a = G.stR.a;
+    W3.scareLight.position.set(G.stR.x + Math.cos(a) * 0.55, 1.75, G.stR.y + Math.sin(a) * 0.55);
+    W3.scareLight.intensity = 0.9 + Math.sin(t * 2.3) * 0.15;
+  }
+  if (G.scare > 0) poseScare(G, t);
   updateFlashlights(S, me, G, t);
   W3.renderer.render(W3.scene, W3.camera);
   trackFps(dt);
