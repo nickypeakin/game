@@ -122,7 +122,7 @@ function drawHUD(g, S, me, G, t) {
   drawStrikes(g, me, W - 130, ry);
   ry += 26;
   if (Object.keys(S.players).length > 1) for (const p of Object.values(S.players)) {
-    const st = p.escaped ? "got out" : p.down ? "knocked out" : p.cut ? "TAKEN" : p.hidden ? "hiding" : "";
+    const st = p.escaped ? "got out" : p.down ? "gone" : p.cut ? "TAKEN" : p.hidden ? "hiding" : "";
     g.fillStyle = p.color; g.fillRect(W - 200, ry - 9, 10, 10);
     txt(g, p.name + (p.id === me.id ? " (you)" : "") + (st ? " — " + st : ""), W - 184, ry, { size: 12, color: p.down || p.cut ? "#ff8a80" : p.escaped ? "#a5d6a7" : "#ddd", maxW: 190 });
     ry += 17;
@@ -132,7 +132,7 @@ function drawHUD(g, S, me, G, t) {
   const holding = me.carry ? ITEM_NAMES[me.carry] || me.carry : null;
   if (holding) {
     let hint = "  [G] put back";
-    if (me.carry === "clipboard") hint = "  [C] read  ·  [G] put back";
+    if (me.carry === "clipboard") hint = "  [C] or [E] read  ·  [G] put back";
     if (me.carry === "batteries") hint = "  [R] put them in your flashlight";
     txt(g, "HOLDING: " + holding + hint, 16, H - 22, { size: 12, color: "#ffe0a0", maxW: W - 32 });
   }
@@ -234,7 +234,7 @@ function drawClipboard(g, S, G) {
     txt(g, "Do all of these to finish your night.", bx + 34, by + bh - 34, { size: 12, color: "#6b6b6b", shadow: false, weight: "normal" });
   }
   g.restore();
-  txt(g, "[C] put it down", W / 2, by + bh + 22 > H - 6 ? H - 8 : by + bh + 22, { size: 13, align: "center", color: "#cfd8dc" });
+  txt(g, "[C] or [E] close  ·  [G] put the clipboard back", W / 2, by + bh + 22 > H - 6 ? H - 8 : by + bh + 22, { size: 13, align: "center", color: "#cfd8dc" });
 }
 
 // your phone, held in your left hand (your flashlight goes in your pocket)
@@ -338,6 +338,51 @@ function drawCall(g, G) {
   g.globalAlpha = 1;
 }
 
+// Russian roulette: whose turn it is, and the six chambers (empty ones you've
+// already been through are crossed out)
+function drawRoulette(g, c, W, H, t) {
+  const st = c.st || 0, small = W < 760;
+  const line = (s, y, o) => txt(g, s, W / 2, y, Object.assign({ size: small ? 15 : 18, align: "center", color: "#eceff1" }, o || {}));
+  const vig = g.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, H * 0.85);
+  vig.addColorStop(0, "rgba(0,0,0,0)"); vig.addColorStop(1, "rgba(0,0,0,0.75)");
+  g.fillStyle = vig; g.fillRect(0, 0, W, H);
+  // the cylinder
+  const r = small ? 20 : 26, cx = W - r - (small ? 34 : 44), cy = H - r - (small ? 48 : 60);
+  g.fillStyle = "rgba(20,20,22,0.85)"; g.beginPath(); g.arc(cx, cy, r + 15, 0, Math.PI * 2); g.fill();
+  for (let i = 0; i < 6; i++) {
+    const a = -Math.PI / 2 + (i / 6) * Math.PI * 2, x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+    g.beginPath(); g.arc(x, y, small ? 6 : 8, 0, Math.PI * 2);
+    g.fillStyle = i < c.n ? "#3a3a3e" : i === c.n ? "#ffcc80" : "#8d8f94"; g.fill();
+    if (i < c.n) { g.strokeStyle = "#ff8a80"; g.lineWidth = 2; g.beginPath(); g.moveTo(x - 5, y - 5); g.lineTo(x + 5, y + 5); g.moveTo(x + 5, y - 5); g.lineTo(x - 5, y + 5); g.stroke(); }
+  }
+  txt(g, "1 BULLET", cx, cy + r + 30, { size: 11, align: "center", color: "#ff8a80" });
+  const top = small ? 70 : 90;
+  switch (c.step) {
+    case "intro":
+      line(st < 2.4 ? "He spins the cylinder..." : "...and slides the gun across the table to you.", top);
+      line("You go first.", top + 28, { color: "#ff8a80" });
+      break;
+    case "you": {
+      const left = Math.max(0, Math.ceil(RR_WAIT - st));
+      const pulse = 0.75 + Math.sin(t * 6) * 0.25;
+      line("YOUR TURN", top, { size: small ? 26 : 34, color: `rgba(255,82,82,${pulse})` });
+      line("[E] or click: pick it up and pull the trigger", top + 34);
+      line("He's waiting... " + left, top + 60, { size: 14, color: "#b0bec5" });
+      break;
+    }
+    case "youAim": line("...", top, { size: 30 }); break;
+    case "youSafe": line("*click*", top, { size: 30, color: "#ffe082" }); line("Empty. You put it down. His turn.", top + 32); break;
+    case "him": line("His turn.", top, { size: 24 }); line("He picks it up and holds it to his mask.", top + 30, { color: "#b0bec5" }); break;
+    case "hisAim": line("...", top, { size: 30 }); break;
+    case "hisSafe": line("*click*", top, { size: 30, color: "#ffe082" }); line("Empty. He slides it back to you.", top + 32); break;
+    case "hisShot":
+      line("BANG.", top, { size: 34, color: "#ff1744" });
+      if (st > 2.2) line("He's not dead.", top + 36, { color: "#ff8a80" });
+      if (st > 3.8) line("He sits back up and looks at you.", top + 62, { color: "#ff8a80" });
+      break;
+  }
+}
+
 // story cards, the third-strike scenes, escaping
 function drawStory(g, S, me, G, t) {
   const W = R.W, H = R.H;
@@ -346,11 +391,11 @@ function drawStory(g, S, me, G, t) {
     if (cut.ph === "drag") {
       g.fillStyle = `rgba(40,0,0,${0.35 + Math.sin(t * 3) * 0.1})`; g.fillRect(0, 0, W, H);
       txt(g, "He's dragging you by the foot...", W / 2, H - 60, { size: 18, align: "center", color: "#ff8a80" });
-    } else if (cut.ph === "tv") {
-      txt(g, "Don't turn around.", W / 2, H - 60, { size: 18, align: "center", color: "#cfd8dc" });
+    } else if (cut.ph === "rr") {
+      drawRoulette(g, cut, W, H, t);
     } else if (cut.ph === "ko") {
       g.fillStyle = `rgba(0,0,0,${Math.min(1, cut.t * 1.5)})`; g.fillRect(0, 0, W, H);
-      if (cut.t > 0.8) txt(g, "KNOCKED OUT", W / 2, H / 2, { size: W < 760 ? 30 : 44, align: "center", color: "#ff1744" });
+      if (cut.t > 0.8) txt(g, "YOU DIDN'T MAKE IT", W / 2, H / 2, { size: W < 760 ? 30 : 44, align: "center", color: "#ff1744" });
     } else if (cut.ph === "carry") {
       g.fillStyle = "rgba(0,0,0,0.35)"; g.fillRect(0, 0, W, H);
       txt(g, "He's carrying you back to bed...", W / 2, H - 60, { size: 18, align: "center", color: "#cfd8dc" });
@@ -358,7 +403,7 @@ function drawStory(g, S, me, G, t) {
   }
   if (me.escaped || me.down) {
     g.fillStyle = "rgba(0,0,0,0.88)"; g.fillRect(0, 0, W, H);
-    txt(g, me.escaped ? "YOU GOT OUT" : "KNOCKED OUT", W / 2, H / 2 - 10, { size: W < 760 ? 30 : 44, align: "center", color: me.escaped ? "#a5d6a7" : "#ff1744" });
+    txt(g, me.escaped ? "YOU GOT OUT" : "YOU DIDN'T MAKE IT", W / 2, H / 2 - 10, { size: W < 760 ? 30 : 44, align: "center", color: me.escaped ? "#a5d6a7" : "#ff1744" });
     txt(g, "Waiting for the others...", W / 2, H / 2 + 26, { size: 16, align: "center", color: "#cfd8dc" });
   }
   if (G.card) {
@@ -430,6 +475,7 @@ function drawOverlay(S, me, G, t) {
   const g = R.h;
   g.setTransform(1, 0, 0, 1, 0, 0);
   g.clearRect(0, 0, R.W, R.H);
+  if (G.black > 0 && S.cut && S.cut.id === me.id) { g.fillStyle = "#000"; g.fillRect(0, 0, R.W, R.H); return; }
   if (G.scare > 0) {
     // getting grabbed: violent red/black flashes over his face
     if (G.scare > 1.25 || Math.random() < 0.2) { g.fillStyle = Math.random() < 0.5 ? "rgba(150,0,0,0.45)" : "rgba(0,0,0,0.6)"; g.fillRect(0, 0, R.W, R.H); }

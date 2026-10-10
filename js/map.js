@@ -177,9 +177,10 @@ const SPOTS = {
   center: { x: 14.5, y: 14.5 },
   clipboard: { x: 16.5, y: 21.3, h: 0.92 }, // on the counter next to the kitchen sink
   safe: { x: 20.5, y: 11.5 },
-  holeIn: { x: 8.6, y: 14.4 },        // where he climbs out of the hole
-  couch: { x: 10, y: 20.45 },         // the seat facing the TV
-  behindCouch: { x: 10, y: 21.55 },
+  rrDrag: { x: 17, y: 20.6 },         // where he drags you: the kitchen table...
+  rrYou: { x: 17, y: 20.0 },          // ...your chair...
+  rrHim: { x: 17, y: 18.0 },          // ...his chair, across from you...
+  rrGun: { x: 17, y: 19 },            // ...and the revolver between you
   frontOut: { x: 23.2, y: 18.5 },
 };
 // lying on the bed (two people fit) or on the love seat, under the blanket
